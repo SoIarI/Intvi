@@ -134,11 +134,13 @@ h1,h2,h3,h4,h5,h6{line-height:var(--leading-tight);font-weight:var(--weight-regu
 .nav-group-header:hover{background:var(--color-bg-muted);color:var(--color-text-primary);}
 .nav-group-items{display:flex;flex-direction:column;gap:var(--space-1);margin-top:var(--space-1);padding-left:var(--space-3);}
 
-.nav-section-label{
-  padding:var(--space-3) var(--space-3) 0;
+.nav-item.nav-item-section{
   font-size:var(--text-xs);font-weight:var(--weight-medium);color:var(--color-text-tertiary);
   text-transform:uppercase;letter-spacing:0.04em;
 }
+.nav-item.nav-item-section:hover{color:var(--color-text-primary);}
+.nav-item.nav-item-section.active{color:var(--color-text-primary);}
+.nav-item.nav-item-section .dot{display:none;}
 
 .main{flex:1;min-width:0;padding:var(--space-8) var(--space-10);}
 .view{display:none;}
@@ -273,12 +275,7 @@ tr:hover td{background:var(--color-bg-muted);}
           <button class="nav-item" data-view="software"><span class="dot"></span>Software Dominance</button>
         </div>
       </details>
-      <div class="nav-section">
-        <div class="nav-section-label">Map</div>
-        <div class="nav-group-items">
-          <button class="nav-item" data-view="map"><span class="dot"></span>Map</button>
-        </div>
-      </div>
+      <button class="nav-item nav-item-section" data-view="map"><span class="dot"></span>Map</button>
       <details class="nav-group">
         <summary class="nav-group-header">HR</summary>
         <div class="nav-group-items">
