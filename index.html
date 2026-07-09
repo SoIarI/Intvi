@@ -346,7 +346,8 @@ const STORAGE_KEYS = {
   leaveRequests: 'vi_leave_requests',
   tasks: 'vi_tasks',
   dayLogAutosaves: 'vi_daylog_autosaves',
-  dayLogHistory: 'vi_daylog_history'
+  dayLogHistory: 'vi_daylog_history',
+  softwareColors: 'vi_software_colors'
 };
 
 // Friendly names for the JSON-import preview table — keys match STORAGE_KEYS.
@@ -354,7 +355,8 @@ const STORAGE_LABELS = {
   outlets: 'Outlets', visits: 'Visits', assignments: 'Roster Assignments', people: 'People',
   departments: 'Departments', zones: 'Zones', drafts: 'Review Drafts', attendance: 'Attendance',
   dayReportDrafts: 'Day Report Drafts', dayReports: 'Day Reports', leaveTypes: 'Leave Types',
-  leaveRequests: 'Leave Requests', tasks: 'Tasks', dayLogAutosaves: 'Day Logger Drafts', dayLogHistory: 'Day Logger History'
+  leaveRequests: 'Leave Requests', tasks: 'Tasks', dayLogAutosaves: 'Day Logger Drafts', dayLogHistory: 'Day Logger History',
+  softwareColors: 'Software Colors'
 };
 
 const DEFAULT_ZONES = [
@@ -366,6 +368,21 @@ const DEFAULT_ZONES = [
 ];
 
 const SOFTWARE_OPTIONS = ['Ewity', 'No POS / Manual', 'Foodics', 'Other POS', 'Unknown'];
+
+// Keyed by normalized (trimmed, lowercased) software name so "Ewity"/"ewity"/"EWITY"
+// share one color regardless of how an intern typed it. User overrides live in
+// state.softwareColors (Settings → Software Colors); this is just the seed/reset value.
+const DEFAULT_SOFTWARE_COLORS = {
+  'ewity': '#8B0000',
+  'no pos / manual': '#8A8A8A',
+  'foodics': '#3A6EA5',
+  'other pos': '#D97706',
+  'unknown': '#4A4A4A'
+};
+// Deterministic fallback palette for software with no assigned color yet, so
+// the Software Dominance bars stay visually distinct instead of all collapsing
+// into the same gray the moment an intern types a POS name outside the list above.
+const SOFTWARE_COLOR_PALETTE = ['#8B0000', '#3A6EA5', '#3A9E5F', '#D97706', '#6B4E9E', '#B5451F', '#2E8B8B', '#A8508A'];
 
 const DEFAULT_DEPARTMENTS = ['Sales', 'Support', 'Field Interns', 'Operations'];
 const DEFAULT_LEAVE_TYPES = ['Annual', 'Sick', 'Emergency', 'Unpaid'];
@@ -486,7 +503,8 @@ let state = {
   leaveRequests: loadJSON(STORAGE_KEYS.leaveRequests, []),
   tasks: loadJSON(STORAGE_KEYS.tasks, []),
   dayLogAutosaves: loadJSON(STORAGE_KEYS.dayLogAutosaves, []),
-  dayLogHistory: loadJSON(STORAGE_KEYS.dayLogHistory, [])
+  dayLogHistory: loadJSON(STORAGE_KEYS.dayLogHistory, []),
+  softwareColors: loadJSON(STORAGE_KEYS.softwareColors, { ...DEFAULT_SOFTWARE_COLORS })
 };
 
 function persist() {
@@ -505,6 +523,7 @@ function persist() {
   saveJSON(STORAGE_KEYS.tasks, state.tasks);
   saveJSON(STORAGE_KEYS.dayLogAutosaves, state.dayLogAutosaves);
   saveJSON(STORAGE_KEYS.dayLogHistory, state.dayLogHistory);
+  saveJSON(STORAGE_KEYS.softwareColors, state.softwareColors);
 }
 
 function toast(msg) {
@@ -1130,9 +1149,40 @@ function colorForCRM(status) {
   if (status === 'not_in_crm') return '#DC2626';
   return '#8A8A8A';
 }
-const SOFTWARE_COLORS = { 'Ewity': '#8B0000', 'No POS / Manual': '#8A8A8A', 'Foodics': '#3A6EA5', 'Other POS': '#D97706', 'Unknown': '#4A4A4A' };
+function softwareColorKey(sw) {
+  return (sw || 'unknown').trim().toLowerCase() || 'unknown';
+}
 function colorForSoftware(sw) {
-  return SOFTWARE_COLORS[sw] || '#4A4A4A';
+  const key = softwareColorKey(sw);
+  if (state.softwareColors[key]) return state.softwareColors[key];
+  // No assigned color yet — pick a stable, distinct-looking fallback so the
+  // bars/legend don't all collapse into the same gray for unrecognized POS names.
+  let hash = 0;
+  for (let i = 0; i < key.length; i++) hash = (hash * 31 + key.charCodeAt(i)) >>> 0;
+  return SOFTWARE_COLOR_PALETTE[hash % SOFTWARE_COLOR_PALETTE.length];
+}
+
+// Distinct software names worth showing a color picker for in Settings: the
+// standard SOFTWARE_OPTIONS list plus anything interns have actually typed
+// into current_software/software_reported, deduped case-insensitively (same
+// bucketing approach as softwareBreakdownCard so the picker's labels match
+// what Software Dominance actually displays).
+function knownSoftwareNames() {
+  const buckets = {};
+  const bump = raw => {
+    const label = (raw || '').trim();
+    if (!label) return;
+    const key = softwareColorKey(label);
+    if (!buckets[key]) buckets[key] = { count: 0, labelCounts: {} };
+    buckets[key].count++;
+    buckets[key].labelCounts[label] = (buckets[key].labelCounts[label] || 0) + 1;
+  };
+  SOFTWARE_OPTIONS.forEach(bump);
+  state.outlets.forEach(o => bump(o.current_software));
+  state.visits.forEach(v => bump(v.software_reported));
+  return Object.entries(buckets)
+    .map(([key, b]) => ({ key, label: Object.entries(b.labelCounts).sort((a, b) => b[1] - a[1])[0][0] }))
+    .sort((a, b) => a.label.localeCompare(b.label));
 }
 const ZONE_COLOR_PALETTE = ['#8B0000', '#3A6EA5', '#3A9E5F', '#D97706', '#6B4E9E', '#B5451F', '#2E8B8B', '#A8508A'];
 function colorForZone(zoneName) {
@@ -3026,6 +3076,15 @@ function renderSettings() {
     </div>
 
     <div class="card" style="margin-top:var(--space-8);">
+      <div class="cluster gap-3" style="justify-content:space-between;">
+        <strong>Software Colors</strong>
+        <button class="btn-ghost btn-sm" id="resetSoftwareColorsBtn">Reset to Defaults</button>
+      </div>
+      <p class="text-sm text-muted" style="margin-top:var(--space-2);margin-bottom:var(--space-4);">Used for the bars and legends on Software Dominance.</p>
+      <div class="stack gap-2" id="softwareColorList"></div>
+    </div>
+
+    <div class="card" style="margin-top:var(--space-8);">
       <strong>Data</strong>
       <p class="text-sm text-muted" style="margin-top:var(--space-2);margin-bottom:var(--space-4);">Everything is stored in this browser only. Export a backup, import one from another copy of this file, or clear all data.</p>
       <div class="cluster gap-3">
@@ -3051,6 +3110,11 @@ function renderSettings() {
     <div class="cluster gap-2" style="justify-content:space-between;">
       <span class="text-sm">${escapeHTML(t)}</span>
       <button class="btn-ghost btn-sm remove-leave-type-btn" data-name="${escapeHTML(t)}">Remove</button>
+    </div>`).join('');
+  document.getElementById('softwareColorList').innerHTML = knownSoftwareNames().map(({ key, label }) => `
+    <div class="cluster gap-3" style="justify-content:space-between;">
+      <span class="text-sm">${escapeHTML(label)}</span>
+      <input type="color" class="software-color-input" data-key="${escapeHTML(key)}" value="${colorForSoftware(label)}" style="width:44px;height:28px;padding:0;border:1px solid var(--color-border);border-radius:var(--radius-sm);background:none;cursor:pointer;">
     </div>`).join('');
 
   document.getElementById('addZoneBtn').addEventListener('click', () => {
@@ -3090,6 +3154,18 @@ function renderSettings() {
       persist(); renderSettings();
     });
   });
+  document.querySelectorAll('.software-color-input').forEach(inp => {
+    inp.addEventListener('input', () => {
+      state.softwareColors[inp.dataset.key] = inp.value;
+      persist();
+    });
+  });
+  document.getElementById('resetSoftwareColorsBtn').addEventListener('click', () => {
+    if (!confirm('Reset all software colors to defaults?')) return;
+    state.softwareColors = { ...DEFAULT_SOFTWARE_COLORS };
+    persist();
+    renderSettings();
+  });
   document.getElementById('exportBtn').addEventListener('click', () => {
     const blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
@@ -3115,7 +3191,8 @@ function renderSettings() {
       attendance: [], dayReportDrafts: [], dayReports: [],
       leaveTypes: state.leaveTypes, leaveRequests: [],
       tasks: [],
-      dayLogAutosaves: [], dayLogHistory: []
+      dayLogAutosaves: [], dayLogHistory: [],
+      softwareColors: state.softwareColors
     };
     persist();
     toast('All data cleared');
@@ -3139,12 +3216,19 @@ function importRecordKey(item) {
 
 function diffImportRecords(parsed) {
   return Object.keys(STORAGE_KEYS).map(key => {
-    const incoming = Array.isArray(parsed[key]) ? parsed[key] : [];
-    const current = Array.isArray(state[key]) ? state[key] : [];
-    const seen = new Set(current.map(importRecordKey));
-    const newItems = incoming.filter(item => !seen.has(importRecordKey(item)));
-    return { key, incoming, newItems };
-  }).filter(d => d.incoming.length > 0);
+    if (Array.isArray(state[key])) {
+      const incoming = Array.isArray(parsed[key]) ? parsed[key] : [];
+      const seen = new Set(state[key].map(importRecordKey));
+      const newItems = incoming.filter(item => !seen.has(importRecordKey(item)));
+      return { key, kind: 'array', incomingCount: incoming.length, newItems };
+    }
+    // Plain-object keyed settings (e.g. softwareColors) — merge missing keys only,
+    // so an old backup can't stomp a color you've already customized since.
+    const incomingObj = (parsed[key] && typeof parsed[key] === 'object' && !Array.isArray(parsed[key])) ? parsed[key] : {};
+    const current = state[key] || {};
+    const newItems = Object.entries(incomingObj).filter(([k]) => !(k in current));
+    return { key, kind: 'object', incomingCount: Object.keys(incomingObj).length, newItems };
+  }).filter(d => d.incomingCount > 0);
 }
 
 function handleImportFile(file) {
@@ -3172,7 +3256,7 @@ function openImportPreviewModal(parsed) {
       <table>
         <thead><tr><th>Data</th><th>In file</th><th>New</th></tr></thead>
         <tbody>
-          ${diffs.map(d => `<tr><td>${escapeHTML(STORAGE_LABELS[d.key] || d.key)}</td><td class="text-muted">${d.incoming.length}</td><td>${d.newItems.length ? `<strong>${d.newItems.length}</strong>` : '<span class="text-tertiary">0</span>'}</td></tr>`).join('')}
+          ${diffs.map(d => `<tr><td>${escapeHTML(STORAGE_LABELS[d.key] || d.key)}</td><td class="text-muted">${d.incomingCount}</td><td>${d.newItems.length ? `<strong>${d.newItems.length}</strong>` : '<span class="text-tertiary">0</span>'}</td></tr>`).join('')}
         </tbody>
       </table>
     </div>
@@ -3190,8 +3274,13 @@ function openImportPreviewModal(parsed) {
 
 function commitImport(diffs) {
   let totalAdded = 0;
-  diffs.forEach(({ key, newItems }) => {
-    state[key] = (Array.isArray(state[key]) ? state[key] : []).concat(newItems);
+  diffs.forEach(({ key, kind, newItems }) => {
+    if (kind === 'array') {
+      state[key] = (Array.isArray(state[key]) ? state[key] : []).concat(newItems);
+    } else {
+      state[key] = { ...(state[key] || {}) };
+      newItems.forEach(([k, v]) => { state[key][k] = v; });
+    }
     totalAdded += newItems.length;
   });
   persist();
