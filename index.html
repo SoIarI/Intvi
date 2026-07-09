@@ -378,14 +378,16 @@ const DAYLOG_CATEGORIES = [
   { value: 'other', label: 'Other' }
 ];
 const DAYLOG_FIELD_LABELS = { PHN: 'Phone / Name', DN: 'Deal / Ticket', ST: 'Stage', AS: 'Staff', NF: 'Note' };
-const DAYLOG_TABS = [
-  { id: 'tasks', label: 'Tasks' },
-  { id: 'calls', label: 'Calls' },
-  { id: 'tickets', label: 'Tickets' },
-  { id: 'wa', label: 'WA' },
-  { id: 'other', label: 'Other' }
-];
-const DAYLOG_TAB_CATEGORY = { tasks: 'task', calls: 'call', tickets: 'ticket', wa: 'wa', other: 'other' };
+// Field set per category — matches the source app's build-fields.ts. "optional"
+// fields for task (dn/st) are tucked behind the capture bar's "+ Deal" toggle.
+const DAYLOG_CATEGORY_FIELDS = {
+  task:   { required: ['PHN', 'NF'], optional: ['DN', 'ST'] },
+  call:   { required: ['PHN', 'NF'], optional: [] },
+  ticket: { required: ['DN', 'AS'],  optional: ['NF'] },
+  wa:     { required: ['PHN', 'NF'], optional: [] },
+  other:  { required: ['NF'],        optional: [] }
+};
+const DAYLOG_TAB_SHORT_LABELS = { task: 'Tasks', call: 'Calls', ticket: 'Tickets', wa: 'WA', other: 'Other' };
 const DAYLOG_INPUT_STYLE = 'background:var(--color-bg-muted);border:1px solid var(--color-border);border-radius:var(--radius-sm);padding:var(--space-2) var(--space-3);font-size:var(--text-sm);color:var(--color-text-primary);';
 
 /* One-time migration: earlier versions of this app stored a flat list of
@@ -3084,19 +3086,78 @@ function renderSettings() {
 
 /* ============================================================
    VIEW: DAY LOGGER
-   Per-person hourly activity log split into Tasks/Calls/Tickets/WA/
-   Other tabs. Entries autosave into dayLogAutosaves as they're
-   edited; "Submit" moves the active tab's entries for the selected
-   person/date into dayLogHistory as a standing record. History rows
-   stay correctable afterward via the inline .daylog-val fields.
+   Per-person hour-by-hour activity timeline, ported from the
+   standalone day-tracker app's capture-bar + hour-timeline pattern.
+   A compact capture bar logs one entry at a time into the selected
+   hour/category; entries autosave into dayLogAutosaves as drafts.
+   "Submit Day" moves that person/date's drafts into dayLogHistory.
+   The hour timeline renders drafts and submitted entries together
+   (draft entries removable, both kinds inline-editable via click).
    ============================================================ */
 
 let daylogPerson = '';
 let daylogDate = todayISO();
-let daylogActiveTab = DAYLOG_TABS[0].id;
+let daylogCategory = DAYLOG_CATEGORIES[0].value;
+let daylogDealExpanded = false;
+let daylogExpandedHours = new Set();
+let daylogHourActiveCat = {};
 
-function daylogHourOptions() {
-  return Array.from({ length: DAYLOG_HOURS_END - DAYLOG_HOURS_START }, (_, i) => `${String(DAYLOG_HOURS_START + i).padStart(2, '0')}:00`);
+function daylogHourSlots() {
+  return Array.from({ length: DAYLOG_HOURS_END - DAYLOG_HOURS_START }, (_, i) => {
+    const h = DAYLOG_HOURS_START + i;
+    const pad = n => String(n).padStart(2, '0');
+    return { hour: `${pad(h)}:00`, label: `${pad(h)}:00 – ${pad(h + 1)}:00` };
+  });
+}
+
+function daylogDefaultHour() {
+  const slots = daylogHourSlots();
+  const h = new Date().getHours();
+  let best = slots[0].hour;
+  slots.forEach(s => { if (parseInt(s.hour, 10) <= h) best = s.hour; });
+  return best;
+}
+
+let daylogSelectedHour = daylogDefaultHour();
+
+function daylogAllEntries(person, date) {
+  const drafts = state.dayLogAutosaves.filter(en => en.person === person && en.date === date).map(en => ({ ...en, submitted: false }));
+  const subs = state.dayLogHistory.filter(en => en.person === person && en.date === date).map(en => ({ ...en, submitted: true }));
+  return drafts.concat(subs);
+}
+
+function daylogEntryPlainText(en) {
+  switch (en.category) {
+    case 'task':   return en.DN ? `[${en.DN}${en.ST ? ' · ' + en.ST : ''}] ${en.NF}` : en.NF;
+    case 'call':
+    case 'wa':     return en.PHN ? `${en.PHN} · ${en.NF}` : en.NF;
+    case 'ticket': if (en.DN || en.AS) return en.NF ? `${en.DN} — ${en.AS} · ${en.NF}` : `${en.DN} — ${en.AS}`;
+                   return en.NF;
+    case 'other':  return en.NF;
+  }
+  return '';
+}
+
+function daylogEntryLine(en) {
+  return escapeHTML(daylogEntryPlainText(en));
+}
+
+function daylogEntryLineEditable(en) {
+  const v = f => `<span class="daylog-val" data-id="${en.id}" data-field="${f}" data-submitted="${en.submitted ? '1' : '0'}" tabindex="0">${escapeHTML(en[f] || '—')}</span>`;
+  switch (en.category) {
+    case 'task':   return `[${v('DN')} · ${v('ST')}]  ${v('NF')}`;
+    case 'call':
+    case 'wa':     return `${v('PHN')}  ·  ${v('NF')}`;
+    case 'ticket': return `${v('DN')}  —  ${v('AS')}  ·  ${v('NF')}`;
+    case 'other':  return v('NF');
+  }
+  return '';
+}
+
+function daylogFmtHour(hour) {
+  const h = parseInt(hour, 10);
+  const fmt = x => { const ampm = x < 12 ? 'am' : 'pm'; const h12 = x > 12 ? x - 12 : x; return `${h12}:00${ampm}`; };
+  return `${fmt(h)} - ${fmt(h + 1)}`;
 }
 
 function renderDaylog() {
@@ -3116,190 +3177,383 @@ function renderDaylog() {
       </div>
       <div class="field" style="min-width:160px;"><label>Date</label><input type="date" id="daylogDateInput" value="${daylogDate}"></div>
     </div>
-    <div class="cluster gap-2" style="margin-bottom:var(--space-6);flex-wrap:wrap;" id="daylogTabToggle">
-      ${DAYLOG_TABS.map(t => `<button class="btn-ghost btn-sm daylog-tab-btn" data-tab="${t.id}" style="${t.id === daylogActiveTab ? 'background:var(--color-accent);color:var(--color-text-inverse);border-color:var(--color-accent);' : ''}">${t.label}</button>`).join('')}
-    </div>
-    <div id="daylogTabContent"></div>
+    <div id="daylogBody"></div>
   `;
 
   document.getElementById('daylogPersonSelect').addEventListener('change', e => {
     daylogPerson = e.target.value;
-    renderDaylog();
+    renderDaylogBody();
   });
   document.getElementById('daylogDateInput').addEventListener('change', e => {
     daylogDate = e.target.value || todayISO();
-    renderDaylog();
-  });
-  document.querySelectorAll('.daylog-tab-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      daylogActiveTab = btn.dataset.tab;
-      renderDaylog();
-    });
+    daylogSelectedHour = daylogDefaultHour();
+    renderDaylogBody();
   });
 
-  renderDaylogTabContent();
+  renderDaylogBody();
 }
 
-function renderDaylogTabContent() {
-  const el = document.getElementById('daylogTabContent');
+function renderDaylogBody() {
+  const el = document.getElementById('daylogBody');
   if (!daylogPerson) {
     el.innerHTML = '<div class="empty-state"><p>Add a person in HR → Directory first.</p></div>';
     return;
   }
 
-  const category = DAYLOG_TAB_CATEGORY[daylogActiveTab];
-  const tabLabel = DAYLOG_TABS.find(t => t.id === daylogActiveTab).label;
-  const entries = state.dayLogAutosaves.filter(en => en.person === daylogPerson && en.date === daylogDate && en.category === category);
-  const hourOpts = daylogHourOptions();
-  const fieldKeys = Object.keys(DAYLOG_FIELD_LABELS);
+  const entries = daylogAllEntries(daylogPerson, daylogDate);
+  const totals = { task: 0, call: 0, ticket: 0, wa: 0, other: 0 };
+  entries.forEach(en => { if (totals[en.category] !== undefined) totals[en.category]++; });
+  const dateLabel = new Date(daylogDate + 'T00:00:00').toLocaleDateString('en-GB', { weekday: 'short', day: '2-digit', month: 'short' }).toUpperCase();
 
   el.innerHTML = `
-    <div class="card" style="padding:0;overflow-x:auto;margin-bottom:var(--space-5);">
-      ${entries.length === 0 ? `<div class="empty-state"><p>No ${tabLabel.toLowerCase()} logged yet for this day.</p></div>` : `
-      <table>
-        <thead><tr>
-          <th>Hour</th>
-          ${Object.values(DAYLOG_FIELD_LABELS).map(l => `<th>${l}</th>`).join('')}
-          <th></th>
-        </tr></thead>
-        <tbody>
-          ${entries.map(en => `
-            <tr>
-              <td>
-                <select class="daylog-field-input" data-id="${en.id}" data-field="hour">
-                  ${hourOpts.map(h => `<option value="${h}" ${en.hour === h ? 'selected' : ''}>${h}</option>`).join('')}
-                </select>
-              </td>
-              ${fieldKeys.map(f => `<td><input type="text" class="daylog-field-input" data-id="${en.id}" data-field="${f}" value="${escapeHTML(en[f] || '')}" placeholder="${DAYLOG_FIELD_LABELS[f]}"></td>`).join('')}
-              <td><button class="btn-ghost btn-sm daylog-remove-btn" data-id="${en.id}">Remove</button></td>
-            </tr>
-          `).join('')}
-        </tbody>
-      </table>`}
-    </div>
-    <div class="cluster gap-3" style="justify-content:space-between;flex-wrap:wrap;">
-      <button class="btn-ghost btn-sm" id="daylogAddEntryBtn">+ Add Entry</button>
-      <button class="btn-primary btn-sm" id="daylogSubmitBtn" ${entries.length === 0 ? 'disabled' : ''}>Submit ${tabLabel}${entries.length ? ` (${entries.length})` : ''}</button>
+    <div class="card" style="margin-bottom:var(--space-4);">
+      <div class="cluster" style="gap:var(--space-5);flex-wrap:wrap;align-items:center;">
+        <span style="font-family:var(--font-display);font-size:var(--text-lg);color:var(--color-accent);letter-spacing:0.03em;">${dateLabel}</span>
+        ${DAYLOG_CATEGORIES.map(c => `<button type="button" class="daylog-stat-btn" data-cat="${c.value}" style="background:none;border:none;cursor:pointer;font-family:var(--font-mono);font-size:var(--text-xs);color:var(--color-text-tertiary);padding:0;">${DAYLOG_TAB_SHORT_LABELS[c.value]} <b style="color:${totals[c.value] ? 'var(--color-accent)' : 'var(--color-text-secondary)'};">${totals[c.value]}</b></button>`).join('')}
+        <span class="text-tertiary mono text-xs" style="margin-left:auto;">${entries.length} ${entries.length === 1 ? 'entry' : 'entries'}</span>
+      </div>
     </div>
 
-    <h3 style="font-size:var(--text-xl);margin-top:var(--space-8);margin-bottom:var(--space-4);">History</h3>
-    <div id="daylogHistoryList"></div>
+    <div class="cluster gap-2" style="margin-bottom:var(--space-5);flex-wrap:wrap;">
+      <button class="btn-ghost btn-sm" id="daylogSubmitBtn" style="border-color:var(--color-accent);color:var(--color-accent);">Submit Day</button>
+      <button class="btn-ghost btn-sm" id="daylogCopyBtn">Copy Report</button>
+      <button class="btn-ghost btn-sm" id="daylogClearBtn">Clear Drafts</button>
+      <button class="btn-ghost btn-sm" id="daylogBackdateBtn">Backdate</button>
+    </div>
+
+    <div class="card" style="margin-bottom:var(--space-6);">
+      <form id="daylogCaptureForm" class="cluster gap-2" style="flex-wrap:wrap;align-items:center;">
+        <select id="daylogHourSelect" style="${DAYLOG_INPUT_STYLE}width:150px;flex-shrink:0;">
+          ${daylogHourSlots().map(s => `<option value="${s.hour}" ${s.hour === daylogSelectedHour ? 'selected' : ''}>${s.label}</option>`).join('')}
+        </select>
+        <select id="daylogCategorySelect" style="${DAYLOG_INPUT_STYLE}width:150px;flex-shrink:0;">
+          ${DAYLOG_CATEGORIES.map(c => `<option value="${c.value}" ${c.value === daylogCategory ? 'selected' : ''}>${c.label}</option>`).join('')}
+        </select>
+        <div id="daylogCaptureFields" class="cluster gap-2" style="flex:1;flex-wrap:wrap;align-items:center;"></div>
+        <button type="button" class="btn-primary btn-sm" id="daylogAddBtn">+ Add</button>
+      </form>
+    </div>
+
+    <div id="daylogTimeline"></div>
   `;
 
-  document.getElementById('daylogAddEntryBtn').addEventListener('click', () => {
-    state.dayLogAutosaves.push({
-      id: uid(), person: daylogPerson, date: daylogDate, category,
-      hour: hourOpts[0], PHN: '', DN: '', ST: '', AS: daylogPerson, NF: ''
-    });
-    persist();
-    renderDaylogTabContent();
+  daylogRenderCaptureFields();
+  daylogRenderTimeline();
+
+  document.getElementById('daylogHourSelect').addEventListener('change', e => { daylogSelectedHour = e.target.value; });
+  document.getElementById('daylogCategorySelect').addEventListener('change', e => {
+    daylogCategory = e.target.value;
+    daylogDealExpanded = false;
+    daylogRenderCaptureFields();
   });
-
-  document.querySelectorAll('.daylog-field-input').forEach(input => {
-    input.addEventListener(input.tagName === 'SELECT' ? 'change' : 'input', () => {
-      const entry = state.dayLogAutosaves.find(en => en.id === input.dataset.id);
-      if (!entry) return;
-      entry[input.dataset.field] = input.value;
-      input.classList.remove('daylog-invalid');
-      persist();
-    });
+  document.getElementById('daylogCaptureForm').addEventListener('keydown', e => {
+    if (e.key === 'Enter' && e.target.tagName !== 'SELECT') { e.preventDefault(); document.getElementById('daylogAddBtn').click(); }
   });
-
-  document.querySelectorAll('.daylog-remove-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      state.dayLogAutosaves = state.dayLogAutosaves.filter(en => en.id !== btn.dataset.id);
-      persist();
-      renderDaylogTabContent();
-    });
+  document.getElementById('daylogAddBtn').addEventListener('click', daylogAddEntry);
+  document.getElementById('daylogSubmitBtn').addEventListener('click', daylogSubmitDay);
+  document.getElementById('daylogCopyBtn').addEventListener('click', daylogCopyReport);
+  document.getElementById('daylogClearBtn').addEventListener('click', daylogClearDrafts);
+  document.getElementById('daylogBackdateBtn').addEventListener('click', daylogOpenBackdateModal);
+  document.querySelectorAll('.daylog-stat-btn').forEach(btn => {
+    btn.addEventListener('click', () => daylogOpenCatPopup(btn.dataset.cat));
   });
-
-  const submitBtn = document.getElementById('daylogSubmitBtn');
-  if (!submitBtn.disabled) submitBtn.addEventListener('click', submitDaylog);
-
-  renderDaylogHistory();
 }
 
-function submitDaylog() {
-  const category = DAYLOG_TAB_CATEGORY[daylogActiveTab];
-  const entries = state.dayLogAutosaves.filter(en => en.person === daylogPerson && en.date === daylogDate && en.category === category);
-  if (entries.length === 0) return;
+function daylogRenderCaptureFields(preserve) {
+  const container = document.getElementById('daylogCaptureFields');
+  if (!container) return;
+  const cfg = DAYLOG_CATEGORY_FIELDS[daylogCategory];
+  const existing = {};
+  if (preserve) container.querySelectorAll('.daylog-cap-input').forEach(inp => { existing[inp.dataset.field] = inp.value; });
 
-  const invalid = entries.filter(en => !en.PHN || !en.PHN.trim());
-  if (invalid.length) {
-    invalid.forEach(en => {
-      const input = document.querySelector(`.daylog-field-input[data-id="${en.id}"][data-field="PHN"]`);
-      if (input) input.classList.add('daylog-invalid');
-    });
-    toast(`${DAYLOG_FIELD_LABELS.PHN} is required on every entry`);
-    return;
+  const inputHTML = (f, wide) => {
+    const req = cfg.required.includes(f);
+    const val = existing[f] !== undefined ? existing[f] : (f === 'AS' && daylogCategory === 'ticket' ? daylogPerson : '');
+    return `<input type="text" class="daylog-cap-input" data-field="${f}" placeholder="${escapeHTML(DAYLOG_FIELD_LABELS[f])}${req ? ' *' : ''}" value="${escapeHTML(val)}" style="${DAYLOG_INPUT_STYLE}${wide ? 'flex:2;' : 'flex:1;'}min-width:110px;">`;
+  };
+
+  let html = cfg.required.map(f => inputHTML(f, daylogCategory === 'other')).join('');
+  if (daylogCategory === 'task') {
+    html += `<button type="button" class="btn-ghost btn-sm" id="daylogDealToggle" style="${daylogDealExpanded ? 'border-color:var(--color-accent);color:var(--color-accent);' : ''}">+ Deal</button>`;
+    if (daylogDealExpanded) html += cfg.optional.map(f => inputHTML(f, false)).join('');
+  } else if (cfg.optional.length) {
+    html += cfg.optional.map(f => inputHTML(f, false)).join('');
   }
 
-  const submittedAt = new Date().toISOString();
-  entries.forEach(en => state.dayLogHistory.push({ ...en, submittedAt }));
-  const submittedIds = new Set(entries.map(en => en.id));
-  state.dayLogAutosaves = state.dayLogAutosaves.filter(en => !submittedIds.has(en.id));
+  container.innerHTML = html;
+  const first = container.querySelector('input');
+  if (first && !preserve) first.focus();
+
+  container.querySelectorAll('.daylog-cap-input').forEach(inp => {
+    inp.addEventListener('input', () => inp.classList.remove('daylog-invalid'));
+  });
+
+  const dealBtn = document.getElementById('daylogDealToggle');
+  if (dealBtn) dealBtn.addEventListener('click', () => {
+    daylogDealExpanded = !daylogDealExpanded;
+    daylogRenderCaptureFields(true);
+    const dn = container.querySelector('[data-field="DN"]');
+    if (dn) dn.focus();
+  });
+}
+
+function daylogAddEntry() {
+  const cfg = DAYLOG_CATEGORY_FIELDS[daylogCategory];
+  const container = document.getElementById('daylogCaptureFields');
+  const values = {};
+  container.querySelectorAll('.daylog-cap-input').forEach(inp => { values[inp.dataset.field] = inp.value.trim(); });
+
+  let valid = true;
+  cfg.required.forEach(f => {
+    if (!values[f]) {
+      valid = false;
+      const inp = container.querySelector(`[data-field="${f}"]`);
+      if (inp) inp.classList.add('daylog-invalid');
+    }
+  });
+  if (!valid) { toast('Fill in the required fields'); return; }
+
+  state.dayLogAutosaves.push({
+    id: uid(), person: daylogPerson, date: daylogDate, category: daylogCategory, hour: daylogSelectedHour,
+    PHN: values.PHN || '', DN: values.DN || '', ST: values.ST || '', AS: values.AS || '', NF: values.NF || ''
+  });
   persist();
-  toast('Day log submitted');
-  renderDaylogTabContent();
+  daylogDealExpanded = false;
+  toast(`${DAYLOG_TAB_SHORT_LABELS[daylogCategory]} logged`);
+  renderDaylogBody();
 }
 
-function renderDaylogHistory() {
-  const el = document.getElementById('daylogHistoryList');
-  const records = state.dayLogHistory
-    .filter(en => en.person === daylogPerson)
-    .sort((a, b) => (b.date + b.hour).localeCompare(a.date + a.hour));
+function daylogRenderTimeline() {
+  const container = document.getElementById('daylogTimeline');
+  if (!container) return;
+  const slots = daylogHourSlots();
+  const isToday = daylogDate === todayISO();
+  const nowHour = new Date().getHours();
+  const entries = daylogAllEntries(daylogPerson, daylogDate);
 
-  if (records.length === 0) {
-    el.innerHTML = '<div class="empty-state"><p>No submitted entries yet.</p></div>';
-    return;
-  }
+  container.innerHTML = slots.map(slot => {
+    const hourEntries = entries.filter(en => en.hour === slot.hour);
+    const counts = { task: 0, call: 0, ticket: 0, wa: 0, other: 0 };
+    hourEntries.forEach(en => { if (counts[en.category] !== undefined) counts[en.category]++; });
+    const isOpen = daylogExpandedHours.has(slot.hour);
+    const isCurrent = isToday && parseInt(slot.hour, 10) === nowHour;
+    const isEmpty = hourEntries.length === 0;
+    const activeTab = daylogHourActiveCat[slot.hour] || DAYLOG_CATEGORIES[0].value;
 
-  const fieldKeys = Object.keys(DAYLOG_FIELD_LABELS);
+    return `
+      <div class="daylog-hour-row" style="border:1px solid var(--color-border);border-radius:var(--radius-sm);margin-bottom:2px;overflow:hidden;${isCurrent ? 'border-left:2px solid var(--color-accent);' : ''}${isEmpty ? 'opacity:0.55;' : ''}">
+        <div class="daylog-hour-toggle" data-hour="${slot.hour}" style="display:flex;align-items:center;gap:var(--space-3);padding:var(--space-2) var(--space-3);cursor:pointer;min-height:42px;">
+          <span style="font-size:10px;color:var(--color-text-tertiary);display:inline-block;transition:transform var(--transition-fast);${isOpen ? 'transform:rotate(90deg);' : ''}">&#9656;</span>
+          <span class="mono" style="font-size:var(--text-xs);color:var(--color-accent);min-width:110px;flex-shrink:0;">${slot.label}</span>
+          <div class="cluster gap-2" style="flex:1;flex-wrap:wrap;">
+            ${DAYLOG_CATEGORIES.map(c => `<span class="pill ${counts[c.value] ? 'pill-error' : 'pill-neutral'}">${daylogChipLabel(c.value)} ${counts[c.value]}</span>`).join('')}
+          </div>
+        </div>
+        ${isOpen ? daylogRenderHourExpand(slot.hour, hourEntries, activeTab) : ''}
+      </div>
+    `;
+  }).join('');
 
-  el.innerHTML = `
-    <div class="card" style="padding:0;overflow-x:auto;">
-      <table>
-        <thead><tr>
-          <th>Date</th><th>Hour</th><th>Category</th>
-          ${Object.values(DAYLOG_FIELD_LABELS).map(l => `<th>${l}</th>`).join('')}
-        </tr></thead>
-        <tbody>
-          ${records.map(en => `
-            <tr>
-              <td class="text-muted">${escapeHTML(en.date)}</td>
-              <td class="text-muted">${escapeHTML(en.hour)}</td>
-              <td class="text-muted">${escapeHTML((DAYLOG_CATEGORIES.find(c => c.value === en.category) || {}).label || en.category)}</td>
-              ${fieldKeys.map(f => `<td><span class="daylog-val" data-id="${en.id}" data-field="${f}" tabindex="0">${escapeHTML(en[f] || '—')}</span></td>`).join('')}
-            </tr>
-          `).join('')}
-        </tbody>
-      </table>
-    </div>
-  `;
-
-  document.querySelectorAll('.daylog-val').forEach(span => {
-    span.addEventListener('click', () => startDaylogValEdit(span));
+  container.querySelectorAll('.daylog-hour-toggle').forEach(elm => {
+    elm.addEventListener('click', () => {
+      const hour = elm.dataset.hour;
+      if (daylogExpandedHours.has(hour)) daylogExpandedHours.delete(hour); else daylogExpandedHours.add(hour);
+      daylogRenderTimeline();
+    });
+  });
+  container.querySelectorAll('.daylog-hour-tab-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      daylogHourActiveCat[btn.dataset.hour] = btn.dataset.cat;
+      daylogRenderTimeline();
+    });
+  });
+  container.querySelectorAll('.daylog-val').forEach(span => {
+    span.addEventListener('click', () => daylogStartValEdit(span));
+  });
+  container.querySelectorAll('.daylog-entry-rm').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const arrKey = btn.dataset.submitted === '1' ? 'dayLogHistory' : 'dayLogAutosaves';
+      state[arrKey] = state[arrKey].filter(en => en.id !== btn.dataset.id);
+      persist();
+      renderDaylogBody();
+    });
   });
 }
 
-function startDaylogValEdit(span) {
+function daylogChipLabel(cat) {
+  return { task: 'T', call: 'C', ticket: 'Tkt', wa: 'WA', other: 'Oth' }[cat] || cat;
+}
+
+function daylogRenderHourExpand(hour, hourEntries, activeTab) {
+  const tabs = DAYLOG_CATEGORIES.map(c => {
+    const count = hourEntries.filter(en => en.category === c.value).length;
+    const active = c.value === activeTab;
+    return `<button type="button" class="daylog-hour-tab-btn" data-hour="${hour}" data-cat="${c.value}" style="padding:6px 10px;background:transparent;border:none;border-bottom:2px solid ${active ? 'var(--color-accent)' : 'transparent'};color:${active ? 'var(--color-accent)' : 'var(--color-text-tertiary)'};font-size:var(--text-xs);cursor:pointer;white-space:nowrap;">${DAYLOG_TAB_SHORT_LABELS[c.value]} <span style="margin-left:4px;background:var(--color-bg-muted);border-radius:99px;padding:0 5px;font-size:10px;">${count}</span></button>`;
+  }).join('');
+
+  const catEntries = hourEntries.filter(en => en.category === activeTab);
+  const body = catEntries.length === 0
+    ? `<p class="text-tertiary text-xs" style="padding:var(--space-2) 0;">No entries</p>`
+    : catEntries.map(en => `
+      <div style="display:flex;align-items:baseline;gap:var(--space-2);padding:var(--space-2) 0;border-bottom:1px solid var(--color-border);font-size:var(--text-sm);">
+        <span style="flex:1;line-height:1.5;">${daylogEntryLineEditable(en)}</span>
+        <button type="button" class="daylog-entry-rm" data-id="${en.id}" data-submitted="${en.submitted ? '1' : '0'}" title="Remove" style="background:none;border:none;color:var(--color-text-tertiary);font-size:16px;line-height:1;cursor:pointer;padding:0 4px;flex-shrink:0;">×</button>
+      </div>
+    `).join('');
+
+  return `
+    <div style="border-top:1px solid var(--color-border);padding:var(--space-3);">
+      <div class="cluster" style="border-bottom:1px solid var(--color-border);overflow-x:auto;margin-bottom:var(--space-2);">${tabs}</div>
+      <div>${body}</div>
+    </div>
+  `;
+}
+
+function daylogStartValEdit(span) {
   if (span.querySelector('input')) return;
-  const entry = state.dayLogHistory.find(en => en.id === span.dataset.id);
+  const submitted = span.dataset.submitted === '1';
+  const arr = submitted ? state.dayLogHistory : state.dayLogAutosaves;
+  const entry = arr.find(en => en.id === span.dataset.id);
   if (!entry) return;
   const field = span.dataset.field;
   const original = entry[field] || '';
-  span.innerHTML = `<input type="text" value="${escapeHTML(original)}" style="${DAYLOG_INPUT_STYLE}width:100%;">`;
+  span.innerHTML = `<input type="text" value="${escapeHTML(original)}" style="${DAYLOG_INPUT_STYLE}min-width:60px;">`;
   const input = span.querySelector('input');
   input.focus();
   input.select();
-  input.addEventListener('blur', () => {
+  const commit = () => {
     entry[field] = input.value.trim();
     persist();
-    span.textContent = entry[field] || '—';
-  });
+    renderDaylogBody();
+  };
+  input.addEventListener('blur', commit);
   input.addEventListener('keydown', e => {
     if (e.key === 'Enter') input.blur();
-    if (e.key === 'Escape') { span.textContent = original || '—'; }
+    if (e.key === 'Escape') { input.removeEventListener('blur', commit); span.textContent = original || '—'; }
+  });
+}
+
+function daylogOpenCatPopup(cat) {
+  const entries = daylogAllEntries(daylogPerson, daylogDate).filter(en => en.category === cat).sort((a, b) => a.hour.localeCompare(b.hour));
+  const modal = document.getElementById('modalContent');
+  modal.innerHTML = `
+    <h3>${escapeHTML((DAYLOG_CATEGORIES.find(c => c.value === cat) || {}).label || cat)} — ${entries.length}</h3>
+    ${entries.length === 0 ? '<p class="text-tertiary">No entries.</p>' : `
+      <div style="max-height:50vh;overflow-y:auto;display:flex;flex-direction:column;gap:var(--space-1);">
+        ${entries.map(en => `<div style="display:flex;gap:var(--space-3);font-size:var(--text-sm);padding:var(--space-2) 0;border-bottom:1px solid var(--color-border);">
+          <span class="mono text-tertiary text-xs" style="flex-shrink:0;">${escapeHTML(en.hour)}</span>
+          <span>${daylogEntryLine(en)}</span>
+        </div>`).join('')}
+      </div>
+    `}
+    <div class="cluster gap-3" style="margin-top:var(--space-6);justify-content:flex-end;">
+      <button class="btn-ghost btn-sm" id="closeModalBtn">Close</button>
+    </div>
+  `;
+  document.getElementById('modalOverlay').classList.add('active');
+  document.getElementById('closeModalBtn').addEventListener('click', closeModal);
+}
+
+function daylogSubmitDay() {
+  const drafts = state.dayLogAutosaves.filter(en => en.person === daylogPerson && en.date === daylogDate);
+  if (drafts.length === 0) { toast('No entries — nothing to submit'); return; }
+  const submittedAt = new Date().toISOString();
+  drafts.forEach(en => state.dayLogHistory.push({ ...en, submittedAt }));
+  const draftIds = new Set(drafts.map(en => en.id));
+  state.dayLogAutosaves = state.dayLogAutosaves.filter(en => !draftIds.has(en.id));
+  persist();
+  toast(`Day submitted (${drafts.length} ${drafts.length === 1 ? 'entry' : 'entries'})`);
+  renderDaylogBody();
+}
+
+function daylogClearDrafts() {
+  const drafts = state.dayLogAutosaves.filter(en => en.person === daylogPerson && en.date === daylogDate);
+  if (drafts.length === 0) { toast('No drafts to clear'); return; }
+  if (!confirm(`Clear ${drafts.length} unsubmitted ${drafts.length === 1 ? 'entry' : 'entries'} for ${daylogPerson} on ${daylogDate}? This can't be undone.`)) return;
+  const draftIds = new Set(drafts.map(en => en.id));
+  state.dayLogAutosaves = state.dayLogAutosaves.filter(en => !draftIds.has(en.id));
+  persist();
+  toast('Drafts cleared');
+  renderDaylogBody();
+}
+
+function daylogCopyReport() {
+  const entries = daylogAllEntries(daylogPerson, daylogDate);
+  if (entries.length === 0) { toast('No entries to copy'); return; }
+
+  const dateStr = new Date(daylogDate + 'T00:00:00').toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: '2-digit' });
+  const lines = [`${daylogPerson} — ${dateStr}`, ''];
+  const totals = { task: 0, call: 0, ticket: 0, wa: 0, other: 0 };
+
+  daylogHourSlots().forEach(slot => {
+    const hourEntries = entries.filter(en => en.hour === slot.hour);
+    if (hourEntries.length === 0) return;
+    lines.push(daylogFmtHour(slot.hour));
+    DAYLOG_CATEGORIES.forEach(c => {
+      const catEntries = hourEntries.filter(en => en.category === c.value);
+      if (catEntries.length === 0) return;
+      lines.push(`${DAYLOG_TAB_SHORT_LABELS[c.value]}: ${catEntries.length}`);
+      catEntries.forEach(en => lines.push(`• ${daylogEntryPlainText(en)}`));
+      totals[c.value] += catEntries.length;
+    });
+    lines.push('');
+  });
+
+  lines.push('── Day Totals ──');
+  lines.push(`Tasks: ${totals.task}  |  Calls: ${totals.call}  |  Tickets: ${totals.ticket}  |  WA: ${totals.wa}  |  Other: ${totals.other}`);
+  lines.push(`Total entries: ${entries.length}`);
+
+  navigator.clipboard.writeText(lines.join('\n')).then(() => toast('Report copied')).catch(() => toast('Copy failed'));
+}
+
+function daylogOpenBackdateModal() {
+  const modal = document.getElementById('modalContent');
+  modal.innerHTML = `
+    <h3>Backdate Entry</h3>
+    <p class="text-tertiary text-sm" style="margin-bottom:var(--space-4);">Log counts for a past day without hour-by-hour detail. Adds placeholder entries straight into ${escapeHTML(daylogPerson)}'s submitted history.</p>
+    <div class="field" style="margin-bottom:var(--space-3);"><label>Date</label><input type="date" id="bdDate" value="${daylogDate}" max="${todayISO()}"></div>
+    <div class="grid-3" style="gap:var(--space-3);margin-bottom:var(--space-3);">
+      <div class="field"><label>Tasks</label><input type="number" id="bdTask" min="0" value="0"></div>
+      <div class="field"><label>Calls</label><input type="number" id="bdCall" min="0" value="0"></div>
+      <div class="field"><label>WhatsApp</label><input type="number" id="bdWa" min="0" value="0"></div>
+    </div>
+    <div class="grid-3" style="gap:var(--space-3);margin-bottom:var(--space-3);">
+      <div class="field"><label>Tickets</label><input type="number" id="bdTicket" min="0" value="0"></div>
+      <div class="field"><label>Other</label><input type="number" id="bdOther" min="0" value="0"></div>
+    </div>
+    <div class="field" style="margin-bottom:var(--space-5);"><label>Note (optional)</label><input type="text" id="bdNote" placeholder="e.g. Leave day, offline visits"></div>
+    <div class="cluster gap-3" style="justify-content:flex-end;">
+      <button class="btn-ghost btn-sm" id="closeModalBtn">Cancel</button>
+      <button class="btn-primary btn-sm" id="saveBackdateBtn">Save</button>
+    </div>
+  `;
+  document.getElementById('modalOverlay').classList.add('active');
+  document.getElementById('closeModalBtn').addEventListener('click', closeModal);
+  document.getElementById('saveBackdateBtn').addEventListener('click', () => {
+    const date = document.getElementById('bdDate').value || daylogDate;
+    const note = document.getElementById('bdNote').value.trim() || '(backdated — no detail)';
+    const counts = {
+      task: parseInt(document.getElementById('bdTask').value, 10) || 0,
+      call: parseInt(document.getElementById('bdCall').value, 10) || 0,
+      wa: parseInt(document.getElementById('bdWa').value, 10) || 0,
+      ticket: parseInt(document.getElementById('bdTicket').value, 10) || 0,
+      other: parseInt(document.getElementById('bdOther').value, 10) || 0
+    };
+    const total = Object.values(counts).reduce((a, b) => a + b, 0);
+    if (total === 0) { toast('Enter at least one count'); return; }
+    const submittedAt = new Date().toISOString();
+    const hour = daylogHourSlots()[0].hour;
+    Object.keys(counts).forEach(cat => {
+      for (let i = 0; i < counts[cat]; i++) {
+        state.dayLogHistory.push({ id: uid(), person: daylogPerson, date, category: cat, hour, PHN: '', DN: '', ST: '', AS: '', NF: note, submittedAt, backdated: true });
+      }
+    });
+    persist();
+    closeModal();
+    toast(`Backdated ${total} ${total === 1 ? 'entry' : 'entries'} for ${date}`);
+    daylogDate = date;
+    daylogSelectedHour = daylogDefaultHour();
+    renderDaylog();
   });
 }
 
