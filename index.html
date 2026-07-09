@@ -298,7 +298,8 @@ const STORAGE_KEYS = {
   dayReportDrafts: 'vi_day_report_drafts',
   dayReports: 'vi_day_reports',
   leaveTypes: 'vi_leave_types',
-  leaveRequests: 'vi_leave_requests'
+  leaveRequests: 'vi_leave_requests',
+  tasks: 'vi_tasks'
 };
 
 const DEFAULT_ZONES = [
@@ -316,6 +317,7 @@ const DEFAULT_LEAVE_TYPES = ['Annual', 'Sick', 'Emergency', 'Unpaid'];
 const EMPLOYMENT_TYPES = ['Full-time', 'Part-time', 'Intern', 'Contract'];
 const PERSON_STATUSES = ['Onboarding', 'Active', 'Inactive'];
 const ATTENDANCE_STATUSES = ['Present', 'Absent', 'Late', 'Half Day', 'On Leave'];
+const HOUR_OPTIONS = Array.from({ length: 24 }, (_, h) => `${String(h).padStart(2, '0')}:00`);
 
 /* One-time migration: earlier versions of this app stored a flat list of
    intern names under 'vi_interns'. The HR module needs richer per-person
@@ -402,7 +404,8 @@ let state = {
   dayReportDrafts: loadJSON(STORAGE_KEYS.dayReportDrafts, []),
   dayReports: loadJSON(STORAGE_KEYS.dayReports, []),
   leaveTypes: loadJSON(STORAGE_KEYS.leaveTypes, DEFAULT_LEAVE_TYPES.slice()),
-  leaveRequests: loadJSON(STORAGE_KEYS.leaveRequests, [])
+  leaveRequests: loadJSON(STORAGE_KEYS.leaveRequests, []),
+  tasks: loadJSON(STORAGE_KEYS.tasks, [])
 };
 
 function persist() {
@@ -418,6 +421,7 @@ function persist() {
   saveJSON(STORAGE_KEYS.dayReports, state.dayReports);
   saveJSON(STORAGE_KEYS.leaveTypes, state.leaveTypes);
   saveJSON(STORAGE_KEYS.leaveRequests, state.leaveRequests);
+  saveJSON(STORAGE_KEYS.tasks, state.tasks);
 }
 
 function toast(msg) {
@@ -2103,6 +2107,7 @@ const HR_TABS = [
   { key: 'attendance', label: 'Attendance' },
   { key: 'dayreports', label: 'Day Reports' },
   { key: 'leave', label: 'Leave & Absences' },
+  { key: 'tasks', label: 'Tasks' },
   { key: 'assignment', label: "Today's Assignment" }
 ];
 let hrActiveTab = 'directory';
@@ -2133,6 +2138,7 @@ function renderHRTabContent() {
   else if (hrActiveTab === 'attendance') renderHRAttendance();
   else if (hrActiveTab === 'dayreports') renderDayReports();
   else if (hrActiveTab === 'leave') renderLeave();
+  else if (hrActiveTab === 'tasks') renderHRTasks();
   else if (hrActiveTab === 'assignment') renderTodayAssignment();
 }
 
@@ -2742,6 +2748,108 @@ function openLeaveModal() {
   });
 }
 
+/* ── Tasks ── freetext task assigned to a person at a specific hour, with a completion checkbox ── */
+
+let taskViewDate = todayISO();
+
+function renderHRTasks() {
+  const el = document.getElementById('hrTabContent');
+  const dayTasks = state.tasks
+    .filter(t => t.date === taskViewDate)
+    .sort((a, b) => a.hour.localeCompare(b.hour));
+
+  el.innerHTML = `
+    <div class="cluster gap-3" style="justify-content:space-between;margin-bottom:var(--space-5);flex-wrap:wrap;">
+      <div class="field" style="min-width:180px;"><label>Date</label><input type="date" id="taskDateInput" value="${taskViewDate}"></div>
+      <button class="btn-primary btn-sm" id="addTaskBtn">+ Assign Task</button>
+    </div>
+    <div class="card" style="padding:0;overflow-x:auto;">
+      ${dayTasks.length === 0 ? '<div class="empty-state"><p>No tasks assigned for this date yet.</p></div>' : `
+      <table>
+        <thead><tr><th></th><th>Hour</th><th>Person</th><th>Task</th><th></th></tr></thead>
+        <tbody>
+          ${dayTasks.map(t => `
+            <tr style="${t.done ? 'opacity:0.6;' : ''}">
+              <td><input type="checkbox" class="task-done-checkbox" data-id="${t.id}" ${t.done ? 'checked' : ''}></td>
+              <td class="text-muted">${escapeHTML(t.hour)}</td>
+              <td><strong>${escapeHTML(t.person)}</strong></td>
+              <td class="text-sm" style="${t.done ? 'text-decoration:line-through;' : ''}">${escapeHTML(t.task)}</td>
+              <td><button class="btn-ghost btn-sm remove-task-btn" data-id="${t.id}">Remove</button></td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>`}
+    </div>
+  `;
+
+  document.getElementById('taskDateInput').addEventListener('change', e => {
+    taskViewDate = e.target.value;
+    renderHRTasks();
+  });
+  document.getElementById('addTaskBtn').addEventListener('click', openTaskModal);
+  document.querySelectorAll('.task-done-checkbox').forEach(cb => {
+    cb.addEventListener('change', () => {
+      const t = state.tasks.find(x => x.id === cb.dataset.id);
+      t.done = cb.checked;
+      persist();
+      renderHRTasks();
+    });
+  });
+  document.querySelectorAll('.remove-task-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      state.tasks = state.tasks.filter(t => t.id !== btn.dataset.id);
+      persist();
+      toast('Task removed');
+      renderHRTasks();
+    });
+  });
+}
+
+function openTaskModal() {
+  const modal = document.getElementById('modalContent');
+  modal.innerHTML = `
+    <div class="cluster gap-3" style="justify-content:space-between;margin-bottom:var(--space-6);">
+      <h3>Assign Task</h3>
+      <button class="btn-ghost btn-sm" id="closeModalBtn">Close</button>
+    </div>
+    <div class="grid-2 gap-4">
+      <div class="field"><label>Person</label>
+        <select id="taskPerson">${personNames().map(n => `<option value="${n}">${n}</option>`).join('')}</select>
+      </div>
+      <div class="field"><label>Hour</label>
+        <select id="taskHour">${HOUR_OPTIONS.map(h => `<option value="${h}" ${h === '09:00' ? 'selected' : ''}>${h}</option>`).join('')}</select>
+      </div>
+      <div class="field"><label>Date</label><input type="date" id="taskDate" value="${taskViewDate}"></div>
+    </div>
+    <div class="field" style="margin-top:var(--space-4);"><label>Task</label><textarea id="taskText" rows="2" placeholder="e.g. Call 3 pending outlets in Hulhumalé"></textarea></div>
+    <div class="cluster gap-3" style="margin-top:var(--space-6);justify-content:flex-end;">
+      <button class="btn-primary btn-sm" id="saveTaskBtn">Assign</button>
+    </div>
+  `;
+  document.getElementById('modalOverlay').classList.add('active');
+  document.getElementById('closeModalBtn').addEventListener('click', closeModal);
+  document.getElementById('saveTaskBtn').addEventListener('click', () => {
+    const task = document.getElementById('taskText').value.trim();
+    const date = document.getElementById('taskDate').value;
+    if (!task) { toast('Task text is required'); return; }
+    if (!date) { toast('Date is required'); return; }
+    state.tasks.push({
+      id: uid(),
+      person: document.getElementById('taskPerson').value,
+      date,
+      hour: document.getElementById('taskHour').value,
+      task,
+      done: false,
+      created_at: nowISO()
+    });
+    persist();
+    toast('Task assigned');
+    closeModal();
+    taskViewDate = date;
+    renderHRTasks();
+  });
+}
+
 /* ── Today's Assignment ── read-only join of assignments + attendance ── */
 
 function renderTodayAssignment() {
@@ -2891,7 +2999,8 @@ function renderSettings() {
       people: state.people, departments: state.departments,
       zones: state.zones, drafts: [],
       attendance: [], dayReportDrafts: [], dayReports: [],
-      leaveTypes: state.leaveTypes, leaveRequests: []
+      leaveTypes: state.leaveTypes, leaveRequests: [],
+      tasks: []
     };
     persist();
     toast('All data cleared');
