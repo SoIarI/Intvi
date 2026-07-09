@@ -1,0 +1,2141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Visit Intelligence</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=DM+Serif+Display&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css" />
+<script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>
+:root{
+  --space-1:4px;--space-2:8px;--space-3:12px;--space-4:16px;--space-5:20px;--space-6:24px;
+  --space-8:32px;--space-10:40px;--space-12:48px;--space-14:56px;--space-16:64px;--space-20:80px;--space-24:96px;
+  --font-sans:'DM Sans',system-ui,-apple-system,sans-serif;
+  --font-display:'DM Serif Display',Georgia,serif;
+  --font-mono:'JetBrains Mono',ui-monospace,monospace;
+  --text-xs:12px;--text-sm:14px;--text-base:16px;--text-lg:20px;--text-xl:24px;--text-2xl:32px;--text-3xl:40px;--text-4xl:56px;
+  --leading-tight:1.25;--leading-snug:1.375;--leading-normal:1.5;--leading-relaxed:1.625;
+  --weight-regular:400;--weight-medium:500;--weight-semibold:600;--weight-bold:700;
+  --prose-width:65ch;
+
+  /* Dark Blood Red — Navaal's system */
+  --color-bg:#0D0D0D;
+  --color-bg-subtle:#161111;
+  --color-bg-muted:#1F1616;
+  --color-border:#332020;
+
+  --color-text-primary:#F5EAEA;
+  --color-text-secondary:#BFA0A0;
+  --color-text-tertiary:#8A6B6B;
+  --color-text-inverse:#FDF7F7;
+
+  --color-accent:#8B0000;
+  --color-accent-hover:#A80000;
+  --color-accent-subtle:#2A1414;
+
+  --color-success:#3A9E5F;
+  --color-success-subtle:#132A1B;
+  --color-warning:#D97706;
+  --color-warning-subtle:#2A2013;
+  --color-error:#DC2626;
+  --color-error-subtle:#2A1414;
+  --color-neutral:#6B6B6B;
+  --color-neutral-subtle:#1C1C1C;
+
+  --shadow-sm:0 1px 4px rgba(0,0,0,0.35);
+  --shadow-md:0 4px 20px rgba(0,0,0,0.5);
+
+  --radius-sm:10px;--radius-md:16px;--radius-lg:22px;--radius-full:9999px;
+  --transition-fast:150ms ease;--transition-base:200ms ease;
+}
+
+/* Light Blood Red — same accent, light surfaces */
+html[data-theme="light"]{
+  --color-bg:#FDF7F7;
+  --color-bg-subtle:#FFFFFF;
+  --color-bg-muted:#F5EAEA;
+  --color-border:#E8D5D5;
+
+  --color-text-primary:#241414;
+  --color-text-secondary:#6B4E4E;
+  --color-text-tertiary:#9A7A7A;
+  --color-text-inverse:#FDF7F7;
+
+  --color-accent:#8B0000;
+  --color-accent-hover:#6E0000;
+  --color-accent-subtle:#FBE8E8;
+
+  --color-success:#1E7A45;
+  --color-success-subtle:#E6F4EA;
+  --color-warning:#B45F04;
+  --color-warning-subtle:#FCEFDD;
+  --color-error:#C41E1E;
+  --color-error-subtle:#FBE8E8;
+  --color-neutral:#8A8A8A;
+  --color-neutral-subtle:#F0EBEB;
+
+  --shadow-sm:0 1px 4px rgba(139,0,0,0.08);
+  --shadow-md:0 4px 20px rgba(139,0,0,0.12);
+}
+
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
+html{font-size:100%;-webkit-text-size-adjust:100%;}
+body{
+  font-family:var(--font-sans);font-size:var(--text-base);line-height:var(--leading-normal);
+  color:var(--color-text-primary);background-color:var(--color-bg);
+  -webkit-font-smoothing:antialiased;
+}
+img,video{max-width:100%;display:block;}
+a{color:inherit;text-decoration:none;}
+button{cursor:pointer;border:none;background:none;font:inherit;color:inherit;}
+input,select,textarea{font:inherit;color:inherit;}
+h1,h2,h3,h4,h5,h6{line-height:var(--leading-tight);font-weight:var(--weight-regular);font-family:var(--font-display);color:var(--color-text-primary);}
+
+/* ── Layout shell ── */
+.app{display:flex;min-height:100vh;}
+
+.sidebar{
+  width:220px;flex-shrink:0;background:var(--color-bg-subtle);
+  border-right:1px solid var(--color-border);
+  padding:var(--space-6) var(--space-4);
+  display:flex;flex-direction:column;gap:var(--space-8);
+  position:sticky;top:0;height:100vh;overflow-y:auto;
+}
+.brand{padding:0 var(--space-2);}
+.brand h1{font-size:var(--text-xl);}
+.brand p{font-size:var(--text-xs);color:var(--color-text-tertiary);margin-top:var(--space-1);}
+
+.nav{display:flex;flex-direction:column;gap:var(--space-1);}
+.nav-item{
+  display:flex;align-items:center;gap:var(--space-3);
+  padding:var(--space-3) var(--space-3);border-radius:var(--radius-sm);
+  font-size:var(--text-sm);font-weight:var(--weight-medium);color:var(--color-text-secondary);
+  transition:background var(--transition-fast), color var(--transition-fast);
+}
+.nav-item:hover{background:var(--color-bg-muted);color:var(--color-text-primary);}
+.nav-item.active{background:var(--color-accent-subtle);color:var(--color-text-primary);}
+.nav-item .dot{width:6px;height:6px;border-radius:50%;background:var(--color-text-tertiary);flex-shrink:0;}
+.nav-item.active .dot{background:var(--color-accent);}
+
+.main{flex:1;min-width:0;padding:var(--space-8) var(--space-10);}
+.view{display:none;}
+.view.active{display:block;animation:fadeIn 200ms ease;}
+@keyframes fadeIn{from{opacity:0;}to{opacity:1;}}
+
+.view-header{margin-bottom:var(--space-8);display:flex;justify-content:space-between;align-items:flex-end;gap:var(--space-4);flex-wrap:wrap;}
+.view-header h2{font-size:var(--text-2xl);}
+.view-header p{color:var(--color-text-secondary);font-size:var(--text-sm);margin-top:var(--space-1);}
+
+/* ── Common components ── */
+.card{background:var(--color-bg-subtle);border-radius:var(--radius-lg);padding:var(--space-6);box-shadow:var(--shadow-sm);border:1px solid var(--color-border);}
+.stack{display:flex;flex-direction:column;}
+.cluster{display:flex;flex-wrap:wrap;align-items:center;}
+.gap-1{gap:var(--space-1);}.gap-2{gap:var(--space-2);}.gap-3{gap:var(--space-3);}.gap-4{gap:var(--space-4);}.gap-6{gap:var(--space-6);}.gap-8{gap:var(--space-8);}
+
+.grid-2{display:grid;grid-template-columns:1fr 1fr;gap:var(--space-6);}
+.grid-3{display:grid;grid-template-columns:repeat(3,1fr);gap:var(--space-6);}
+.grid-4{display:grid;grid-template-columns:repeat(4,1fr);gap:var(--space-4);}
+
+.text-xs{font-size:var(--text-xs);}
+.text-sm{font-size:var(--text-sm);}
+.text-lg{font-size:var(--text-lg);}
+.text-muted{color:var(--color-text-secondary);}
+.text-tertiary{color:var(--color-text-tertiary);}
+.mono{font-family:var(--font-mono);}
+
+.btn-primary{
+  display:inline-flex;align-items:center;justify-content:center;gap:var(--space-2);
+  padding:var(--space-3) var(--space-6);background:var(--color-accent);color:var(--color-text-inverse);
+  border-radius:var(--radius-full);font-size:var(--text-sm);font-weight:var(--weight-medium);
+  transition:background var(--transition-fast);white-space:nowrap;
+}
+.btn-primary:hover{background:var(--color-accent-hover);}
+.btn-primary:disabled{opacity:0.4;cursor:not-allowed;}
+
+.btn-ghost{
+  display:inline-flex;align-items:center;justify-content:center;gap:var(--space-2);
+  padding:var(--space-3) var(--space-6);background:transparent;color:var(--color-text-primary);
+  border:1px solid var(--color-border);border-radius:var(--radius-full);
+  font-size:var(--text-sm);font-weight:var(--weight-medium);transition:background var(--transition-fast);white-space:nowrap;
+}
+.btn-ghost:hover{background:var(--color-bg-muted);}
+
+.btn-sm{padding:var(--space-2) var(--space-4);font-size:var(--text-xs);}
+
+.pill{
+  display:inline-flex;align-items:center;gap:var(--space-1);
+  padding:var(--space-1) var(--space-3);border-radius:var(--radius-full);
+  font-size:var(--text-xs);font-weight:var(--weight-medium);
+}
+.pill-success{background:var(--color-success-subtle);color:var(--color-success);}
+.pill-error{background:var(--color-error-subtle);color:#E88888;}
+.pill-neutral{background:var(--color-neutral-subtle);color:var(--color-text-tertiary);}
+.pill-warning{background:var(--color-warning-subtle);color:var(--color-warning);}
+
+.field{display:flex;flex-direction:column;gap:var(--space-2);}
+.field label{font-size:var(--text-xs);font-weight:var(--weight-medium);color:var(--color-text-secondary);text-transform:uppercase;letter-spacing:0.03em;}
+.field input,.field select,.field textarea{
+  background:var(--color-bg-muted);border:1px solid var(--color-border);border-radius:var(--radius-sm);
+  padding:var(--space-3) var(--space-4);font-size:var(--text-sm);color:var(--color-text-primary);
+  transition:border-color var(--transition-fast);
+}
+.field input:focus,.field select:focus,.field textarea:focus{outline:none;border-color:var(--color-accent);}
+.field textarea{resize:vertical;font-family:var(--font-mono);line-height:var(--leading-relaxed);}
+
+table{width:100%;border-collapse:collapse;}
+th{text-align:left;font-size:var(--text-xs);text-transform:uppercase;letter-spacing:0.03em;color:var(--color-text-tertiary);font-weight:var(--weight-medium);padding:var(--space-3) var(--space-4);border-bottom:1px solid var(--color-border);}
+td{padding:var(--space-4);font-size:var(--text-sm);border-bottom:1px solid var(--color-border);vertical-align:top;}
+tr:last-child td{border-bottom:none;}
+tr:hover td{background:var(--color-bg-muted);}
+
+.empty-state{padding:var(--space-14) var(--space-6);text-align:center;color:var(--color-text-tertiary);}
+.empty-state p{max-width:40ch;margin:var(--space-2) auto 0;}
+
+.stat-card{background:var(--color-bg-subtle);border:1px solid var(--color-border);border-radius:var(--radius-lg);padding:var(--space-6);}
+.stat-card .stat-value{font-family:var(--font-display);font-size:var(--text-3xl);color:var(--color-text-primary);}
+.stat-card .stat-label{font-size:var(--text-xs);color:var(--color-text-tertiary);text-transform:uppercase;letter-spacing:0.03em;margin-top:var(--space-1);}
+
+.modal-overlay{
+  position:fixed;inset:0;background:rgba(0,0,0,0.7);backdrop-filter:blur(2px);
+  display:none;align-items:center;justify-content:center;z-index:5000;padding:var(--space-6);
+}
+.modal-overlay.active{display:flex;}
+.modal{
+  background:var(--color-bg-subtle);border:1px solid var(--color-border);border-radius:var(--radius-lg);
+  max-width:640px;width:100%;max-height:85vh;overflow-y:auto;padding:var(--space-8);box-shadow:var(--shadow-md);
+}
+.modal h3{font-size:var(--text-xl);margin-bottom:var(--space-6);}
+
+.bar-row{display:flex;align-items:center;gap:var(--space-4);}
+.bar-track{flex:1;height:10px;background:var(--color-bg-muted);border-radius:var(--radius-full);overflow:hidden;display:flex;}
+.bar-segment{height:100%;}
+
+::-webkit-scrollbar{width:8px;height:8px;}
+::-webkit-scrollbar-track{background:transparent;}
+::-webkit-scrollbar-thumb{background:var(--color-border);border-radius:var(--radius-full);}
+
+.toast{
+  position:fixed;bottom:var(--space-8);right:var(--space-8);
+  background:var(--color-bg-muted);border:1px solid var(--color-border);border-radius:var(--radius-md);
+  padding:var(--space-4) var(--space-6);font-size:var(--text-sm);box-shadow:var(--shadow-md);
+  transform:translateY(20px);opacity:0;transition:all var(--transition-base);pointer-events:none;z-index:4000;
+}
+.toast.show{transform:translateY(0);opacity:1;}
+
+@media (max-width:768px){
+  .app{flex-direction:column;}
+  .sidebar{width:100%;height:auto;position:relative;flex-direction:row;overflow-x:auto;padding:var(--space-4);}
+  .nav{flex-direction:row;}
+  .brand{display:none;}
+  .main{padding:var(--space-4);}
+  .grid-2,.grid-3,.grid-4{grid-template-columns:1fr;}
+}
+</style>
+</head>
+<body>
+
+<div class="app">
+  <aside class="sidebar">
+    <div class="brand">
+      <h1>Visit Intel</h1>
+      <p>Field ops for Ewity</p>
+    </div>
+    <nav class="nav" id="nav">
+      <button class="nav-item active" data-view="ingest"><span class="dot"></span>Import Visits</button>
+      <button class="nav-item" data-view="review"><span class="dot"></span>Review Queue</button>
+      <button class="nav-item" data-view="map"><span class="dot"></span>Map</button>
+      <button class="nav-item" data-view="outlets"><span class="dot"></span>Outlets</button>
+      <button class="nav-item" data-view="interns"><span class="dot"></span>Intern Summary</button>
+      <button class="nav-item" data-view="software"><span class="dot"></span>Software Dominance</button>
+      <button class="nav-item" data-view="roster"><span class="dot"></span>Shift Roster</button>
+      <button class="nav-item" data-view="settings"><span class="dot"></span>Settings</button>
+    </nav>
+    <div style="margin-top:auto;">
+      <button class="btn-ghost btn-sm" id="themeToggleBtn" style="width:100%;">Dark</button>
+    </div>
+  </aside>
+
+  <main class="main">
+    <!-- Views injected by JS -->
+    <section class="view active" id="view-ingest"></section>
+    <section class="view" id="view-review"></section>
+    <section class="view" id="view-map"></section>
+    <section class="view" id="view-outlets"></section>
+    <section class="view" id="view-interns"></section>
+    <section class="view" id="view-software"></section>
+    <section class="view" id="view-roster"></section>
+    <section class="view" id="view-settings"></section>
+  </main>
+</div>
+
+<div class="modal-overlay" id="modalOverlay">
+  <div class="modal" id="modalContent"></div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<datalist id="softwareSuggestions"></datalist>
+
+<script>
+/* ============================================================
+   VISIT INTELLIGENCE — standalone single-file app
+   Storage: localStorage only. No network calls except map tiles.
+   ============================================================ */
+
+const STORAGE_KEYS = {
+  outlets: 'vi_outlets',
+  visits: 'vi_visits',
+  assignments: 'vi_assignments',
+  interns: 'vi_interns',
+  zones: 'vi_zones',
+  drafts: 'vi_drafts' // parsed-but-not-reviewed queue
+};
+
+const DEFAULT_ZONES = [
+  { name: 'Malé City', region: 'Malé' },
+  { name: 'Hulhumalé Phase 1', region: 'Hulhumalé' },
+  { name: 'Hulhumalé Phase 2', region: 'Hulhumalé' },
+  { name: 'Hulhulé (Airport)', region: 'Hulhulé' },
+  { name: 'Vilimalé', region: 'Vilimalé' },
+];
+
+const SOFTWARE_OPTIONS = ['Ewity', 'No POS / Manual', 'Foodics', 'Other POS', 'Unknown'];
+
+function loadJSON(key, fallback) {
+  try {
+    const raw = localStorage.getItem(key);
+    return raw ? JSON.parse(raw) : fallback;
+  } catch (e) {
+    return fallback;
+  }
+}
+function saveJSON(key, val) {
+  localStorage.setItem(key, JSON.stringify(val));
+}
+function uid() {
+  return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+}
+function nowISO() {
+  return new Date().toISOString();
+}
+function escapeHTML(str) {
+  if (str === null || str === undefined) return '';
+  return String(str).replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+}
+function normalizeName(str) {
+  return (str || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+}
+
+/* ── Theme ── */
+const THEME_KEY = 'vi_theme';
+function getTheme() {
+  return localStorage.getItem(THEME_KEY) || 'dark';
+}
+function applyTheme(theme) {
+  document.documentElement.setAttribute('data-theme', theme);
+  localStorage.setItem(THEME_KEY, theme);
+  const btn = document.getElementById('themeToggleBtn');
+  if (btn) btn.textContent = theme === 'light' ? '\u2600 Light' : '\u263D Dark';
+  // Redraw any live maps so tile layer + marker strokes match the new theme
+  if (typeof leafletMap !== 'undefined' && leafletMap) { leafletMap.remove(); leafletMap = null; renderMap(); }
+  if (typeof rosterMap !== 'undefined' && rosterMap) { rosterMap.remove(); rosterMap = null; renderRoster(); }
+}
+function toggleTheme() {
+  applyTheme(getTheme() === 'light' ? 'dark' : 'light');
+}
+function mapTileURL() {
+  return getTheme() === 'light'
+    ? 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png'
+    : 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png';
+}
+function markerStrokeColor() {
+  return getTheme() === 'light' ? '#FDF7F7' : '#0D0D0D';
+}
+
+/* ── State ── */
+let state = {
+  outlets: loadJSON(STORAGE_KEYS.outlets, []),
+  visits: loadJSON(STORAGE_KEYS.visits, []),
+  assignments: loadJSON(STORAGE_KEYS.assignments, []),
+  interns: loadJSON(STORAGE_KEYS.interns, ['Aisha', 'Hassan', 'Ibrahim']),
+  zones: loadJSON(STORAGE_KEYS.zones, DEFAULT_ZONES),
+  drafts: loadJSON(STORAGE_KEYS.drafts, [])
+};
+
+function persist() {
+  saveJSON(STORAGE_KEYS.outlets, state.outlets);
+  saveJSON(STORAGE_KEYS.visits, state.visits);
+  saveJSON(STORAGE_KEYS.assignments, state.assignments);
+  saveJSON(STORAGE_KEYS.interns, state.interns);
+  saveJSON(STORAGE_KEYS.zones, state.zones);
+  saveJSON(STORAGE_KEYS.drafts, state.drafts);
+}
+
+function toast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  clearTimeout(t._timer);
+  t._timer = setTimeout(() => t.classList.remove('show'), 2600);
+}
+
+function zoneRegion(zoneName) {
+  const z = state.zones.find(z => z.name === zoneName);
+  return z ? z.region : '';
+}
+
+/* ============================================================
+   PARSER — label-dictionary approach
+   Splits raw pasted text into visit "blocks", then extracts
+   fields from each block using synonym matching on labels.
+   Tolerant of missing fields, different label casing, bullets,
+   emoji headers, and multiple visits stacked in one message.
+   ============================================================ */
+
+const FIELD_SYNONYMS = {
+  business_name: ['outlet name', 'location', 'business name', 'outlet', 'name'],
+  business_type: ['business type', 'type'],
+  phone: ['phone number', 'number', 'contacts', 'contact', 'phone'],
+  contact_owner: ['contact owner', 'owner'],
+  software: ['currently using', 'software', 'current software', 'currently using pos'],
+  notes: ['notes', 'note'],
+  maps_link: ['location link', 'map link', 'maps link', 'link', 'map'],
+  num_outlets: ['number of outlets'],
+  designation: ['designation'],
+  intern_reported: ['agent', 'visited by', 'intern'],
+  coordinates_raw: ['coordinates', 'coordinate', 'gps'],
+  sent_at_raw: ['sent']
+};
+
+// Build a flat lookup: normalized label -> field key, longest labels first
+// so "outlet name" matches before "name" for a line like "Outlet Name: X"
+const LABEL_LOOKUP = (() => {
+  const pairs = [];
+  for (const [field, labels] of Object.entries(FIELD_SYNONYMS)) {
+    for (const label of labels) pairs.push([label, field]);
+  }
+  pairs.sort((a, b) => b[0].length - a[0].length);
+  return pairs;
+})();
+
+const URL_RE = /(https?:\/\/[^\s]+)/gi;
+
+function findLabelInLine(line) {
+  // Matches "Label:" or "Label -" at the start of a line (after stripping bullets/emoji)
+  const cleaned = line.replace(/^[\s\u2022\-\*📍✅➡️▪️]+/, '').trim();
+  const m = cleaned.match(/^([A-Za-z][A-Za-z \/]{1,30}?)\s*[:\-]\s*(.*)$/);
+  if (!m) return null;
+  const rawLabel = m[1].trim().toLowerCase();
+  const rest = m[2].trim();
+  for (const [label, field] of LABEL_LOOKUP) {
+    if (rawLabel === label) return { field, value: rest, rawLabel: m[1].trim() };
+  }
+  return null;
+}
+
+// Header lines that signal "a new visit starts here" even without a colon
+const BLOCK_HEADER_RE = /^(📍\s*)?visit report\s*:?$/i;
+const VISITS_HEADER_RE = /^visits\s*:?$/i;
+
+/**
+ * Parse a raw pasted message (may contain multiple visits) into
+ * an array of draft visit objects with raw field values (strings).
+ */
+function parseMessageText(rawText) {
+  const lines = rawText.split('\n').map(l => l.trimEnd());
+  const blocks = [];
+  let current = null;
+  // Fields seen before the first business_name label in a message (e.g.
+  // Visit Agent sends "Agent:" before "Location:") get held here and
+  // merged into the block once it actually starts, instead of being
+  // pushed as their own orphan/empty block.
+  let pending = { fields: {}, extraUrls: [] };
+
+  function pushCurrent() {
+    if (current && current.fields.business_name) {
+      blocks.push(current);
+    }
+    current = null;
+  }
+
+  function ensureCurrent() {
+    if (!current) current = { fields: {}, extraUrls: [] };
+    return current;
+  }
+
+  for (let rawLine of lines) {
+    const line = rawLine.trim();
+    if (!line) continue;
+
+    // Section header lines like "Visits" or "📍 Visit Report" don't carry
+    // data themselves, but they DO mark a hard boundary between visits —
+    // Visit Agent emits "📍 Visit Report" once per message, so use it to
+    // close out whatever block is open and clear any stray pending fields,
+    // otherwise a second stacked message's pre-business-name fields (like
+    // its own "Agent:" line) can bleed into the previous block.
+    if (VISITS_HEADER_RE.test(line) || BLOCK_HEADER_RE.test(line)) {
+      pushCurrent();
+      pending = { fields: {}, extraUrls: [] };
+      continue;
+    }
+
+    const found = findLabelInLine(line);
+
+    if (found) {
+      if (found.field === 'business_name') {
+        // New business_name label = finalize any previous block, then
+        // start a fresh one seeded with anything gathered before it
+        // (e.g. Agent/Coordinates lines that came first).
+        pushCurrent();
+        current = { fields: { ...pending.fields }, extraUrls: [...pending.extraUrls] };
+        pending = { fields: {}, extraUrls: [] };
+        current.fields.business_name = found.value;
+      } else {
+        const target = current || pending;
+        if (found.field === 'phone' && target.fields.phone) {
+          // multiple contact lines (bulleted) -> concatenate
+          target.fields.phone += '; ' + found.value;
+        } else {
+          target.fields[found.field] = found.value;
+        }
+      }
+    } else {
+      // Not a labeled line. Could be: a bare URL, a bulleted phone number,
+      // or continuation text (e.g. wrapped notes).
+      const urls = line.match(URL_RE);
+      if (urls) {
+        const target = current || pending;
+        urls.forEach(u => target.extraUrls.push(u));
+        continue;
+      }
+      // bullet line with just a phone-ish token, e.g. "• 7748899 bizara"
+      const bulletMatch = line.match(/^[\u2022\-\*]\s*(.+)$/);
+      if (bulletMatch && current) {
+        current.fields.phone = current.fields.phone
+          ? current.fields.phone + '; ' + bulletMatch[1].trim()
+          : bulletMatch[1].trim();
+        continue;
+      }
+      // otherwise treat as continuation of notes if notes already started,
+      // else ignore (avoids swallowing junk into business_name)
+      if (current && current.fields.notes !== undefined) {
+        current.fields.notes += ' ' + line;
+      }
+    }
+  }
+  pushCurrent();
+
+  // Post-process each block into a normalized draft
+  return blocks.map(b => {
+    const f = b.fields;
+    let mapsLink = f.maps_link || '';
+    if (!mapsLink && b.extraUrls.length) mapsLink = b.extraUrls[0];
+
+    // "Coordinates: 4.192830, 73.529810" -> split into lat/lng directly,
+    // so a Visit Agent GPS report doesn't require manual re-entry.
+    let lat = '', lng = '';
+    if (f.coordinates_raw) {
+      const parts = f.coordinates_raw.split(',').map(s => s.trim());
+      if (parts.length === 2 && !isNaN(parseFloat(parts[0])) && !isNaN(parseFloat(parts[1]))) {
+        lat = parts[0];
+        lng = parts[1];
+      }
+    }
+
+    // "Agent: Hassan" -> resolve against the known intern list (case-insensitive)
+    // so the review queue can pre-select it instead of leaving it blank.
+    let intern = '';
+    let internReportedRaw = (f.intern_reported || '').trim();
+    if (internReportedRaw) {
+      const matchedIntern = state.interns.find(i => normalizeName(i) === normalizeName(internReportedRaw));
+      if (matchedIntern) intern = matchedIntern;
+    }
+
+    return {
+      id: uid(),
+      business_name: (f.business_name || '').trim(),
+      business_type: (f.business_type || '').trim(),
+      phone: (f.phone || '').trim(),
+      software_reported: (f.software || '').trim(),
+      notes: (f.notes || '').trim(),
+      maps_link: mapsLink.trim(),
+      lat: lat,
+      lng: lng,
+      intern: intern,
+      intern_reported_raw: internReportedRaw,
+      zone: '',
+      crm_status: 'unchecked',
+      visited_at: nowISO().slice(0, 10),
+      raw_text: rawText.trim()
+    };
+  });
+}
+
+/**
+ * Parse a full pasted export which may contain several messages.
+ * Since format varies and there's no reliable message delimiter across
+ * all intern styles, we treat the WHOLE paste as one text and let
+ * parseMessageText's block-splitting (on business_name labels) do the work.
+ * This correctly handles both "one message per visit" and "stacked visits
+ * in one message" cases from the same paste.
+ */
+function parseFullPaste(rawText) {
+  return parseMessageText(rawText);
+}
+
+/* ============================================================
+   OUTLET MATCHING & UPSERT
+   Exact-normalized-name match only (no fuzzy scoring, per spec).
+   ============================================================ */
+
+function findMatchingOutlet(businessName) {
+  const norm = normalizeName(businessName);
+  if (!norm) return null;
+  return state.outlets.find(o => normalizeName(o.business_name) === norm) || null;
+}
+
+function commitDraftAsVisit(draft) {
+  let outlet = findMatchingOutlet(draft.business_name);
+  const isNew = !outlet;
+  if (!outlet) {
+    outlet = {
+      id: uid(),
+      business_name: draft.business_name,
+      business_type: draft.business_type,
+      region: zoneRegion(draft.zone),
+      zone: draft.zone,
+      lat: draft.lat,
+      lng: draft.lng,
+      maps_link: draft.maps_link,
+      phone: draft.phone,
+      current_software: draft.software_reported,
+      last_visited_at: draft.visited_at,
+      last_visited_by: draft.intern,
+      crm_status: draft.crm_status
+    };
+    state.outlets.push(outlet);
+  } else {
+    // Update outlet to reflect latest known state
+    if (draft.business_type) outlet.business_type = draft.business_type;
+    if (draft.zone) { outlet.zone = draft.zone; outlet.region = zoneRegion(draft.zone); }
+    if (draft.lat) outlet.lat = draft.lat;
+    if (draft.lng) outlet.lng = draft.lng;
+    if (draft.maps_link) outlet.maps_link = draft.maps_link;
+    if (draft.phone) outlet.phone = draft.phone;
+    if (draft.software_reported) outlet.current_software = draft.software_reported;
+    outlet.last_visited_at = draft.visited_at;
+    outlet.last_visited_by = draft.intern;
+    outlet.crm_status = draft.crm_status;
+  }
+
+  const visit = {
+    id: uid(),
+    outlet_id: outlet.id,
+    intern: draft.intern,
+    visited_at: draft.visited_at,
+    software_reported: draft.software_reported,
+    notes: draft.notes,
+    phone: draft.phone,
+    maps_link: draft.maps_link,
+    raw_text: draft.raw_text,
+    crm_status_at_time: draft.crm_status
+  };
+  state.visits.push(visit);
+  persist();
+  return { outlet, visit, isNew };
+}
+
+function outletVisitCount(outletId) {
+  return state.visits.filter(v => v.outlet_id === outletId).length;
+}
+
+/* ============================================================
+   VIEW: INGEST
+   ============================================================ */
+
+function renderIngest() {
+  const el = document.getElementById('view-ingest');
+  el.innerHTML = `
+    <div class="view-header">
+      <div>
+        <h2>Import Visits</h2>
+        <p>Paste raw Telegram messages below. One or many visits, any format — the parser splits them automatically.</p>
+      </div>
+    </div>
+    <div class="card">
+      <div class="field">
+        <label>Raw pasted text</label>
+        <textarea id="pasteArea" rows="14" placeholder="Paste Telegram visit messages here..."></textarea>
+      </div>
+      <div class="cluster gap-3" style="margin-top:var(--space-5);">
+        <button class="btn-primary" id="parseBtn">Parse Messages</button>
+        <button class="btn-ghost" id="clearPasteBtn">Clear</button>
+        <span class="text-sm text-tertiary" id="parseResultMsg"></span>
+      </div>
+    </div>
+    <div style="margin-top:var(--space-8);">
+      <p class="text-sm text-muted">Drafts waiting in the review queue: <strong id="draftCount">${state.drafts.length}</strong></p>
+    </div>
+  `;
+  document.getElementById('parseBtn').addEventListener('click', () => {
+    const text = document.getElementById('pasteArea').value;
+    if (!text.trim()) { toast('Paste some text first'); return; }
+    const drafts = parseFullPaste(text);
+    if (drafts.length === 0) {
+      document.getElementById('parseResultMsg').textContent = 'No visit blocks detected — check formatting.';
+      return;
+    }
+    state.drafts.push(...drafts);
+    persist();
+    document.getElementById('parseResultMsg').textContent = `Parsed ${drafts.length} visit${drafts.length > 1 ? 's' : ''}. Go to Review Queue to confirm.`;
+    document.getElementById('draftCount').textContent = state.drafts.length;
+    document.getElementById('pasteArea').value = '';
+    toast(`${drafts.length} visit${drafts.length > 1 ? 's' : ''} parsed`);
+  });
+  document.getElementById('clearPasteBtn').addEventListener('click', () => {
+    document.getElementById('pasteArea').value = '';
+  });
+}
+
+/* ============================================================
+   VIEW: REVIEW QUEUE
+   ============================================================ */
+
+function renderReview() {
+  const el = document.getElementById('view-review');
+  if (state.drafts.length === 0) {
+    el.innerHTML = `
+      <div class="view-header"><div><h2>Review Queue</h2><p>Confirm parsed visits before they're saved.</p></div></div>
+      <div class="card empty-state">
+        <h3 style="font-size:var(--text-lg);">Nothing to review</h3>
+        <p>Paste messages in Import Visits to populate this queue.</p>
+      </div>`;
+    return;
+  }
+
+  el.innerHTML = `
+    <div class="view-header">
+      <div><h2>Review Queue</h2><p>${state.drafts.length} visit${state.drafts.length > 1 ? 's' : ''} awaiting confirmation.</p></div>
+    </div>
+    <div class="stack gap-6" id="draftList"></div>
+  `;
+  const list = document.getElementById('draftList');
+  state.drafts.forEach(draft => {
+    const match = findMatchingOutlet(draft.business_name);
+    const card = document.createElement('div');
+    card.className = 'card';
+    card.innerHTML = `
+      <div class="cluster gap-3" style="justify-content:space-between;margin-bottom:var(--space-5);">
+        <div>
+          <span class="pill ${match ? 'pill-success' : 'pill-neutral'}">${match ? 'Matches existing outlet' : 'New outlet'}</span>
+        </div>
+        <button class="btn-ghost btn-sm discard-btn" data-id="${draft.id}">Discard</button>
+      </div>
+      <div class="grid-2 gap-4">
+        <div class="field"><label>Business Name</label><input type="text" data-f="business_name" value="${escapeHTML(draft.business_name)}"></div>
+        <div class="field"><label>Business Type</label><input type="text" data-f="business_type" value="${escapeHTML(draft.business_type)}"></div>
+        <div class="field"><label>Phone / Contacts</label><input type="text" data-f="phone" value="${escapeHTML(draft.phone)}"></div>
+        <div class="field"><label>Software Reported</label>
+          <input type="text" data-f="software_reported" value="${escapeHTML(draft.software_reported)}" list="softwareSuggestions" placeholder="e.g. Ewity, POSbytz, manual">
+        </div>
+        <div class="field"><label>Intern</label>
+          <select data-f="intern">
+            <option value="">— select —</option>
+            ${state.interns.map(i => `<option value="${i}" ${draft.intern === i ? 'selected' : ''}>${i}</option>`).join('')}
+          </select>
+          ${(!draft.intern && draft.intern_reported_raw) ? `<span class="text-xs" style="color:var(--color-warning);">Message reported "${escapeHTML(draft.intern_reported_raw)}" — not in your intern list, add them in Settings or pick manually</span>` : ''}
+        </div>
+        <div class="field"><label>Visit Date</label><input type="date" data-f="visited_at" value="${draft.visited_at}"></div>
+        <div class="field"><label>Zone</label>
+          <select data-f="zone">
+            <option value="">— select —</option>
+            ${state.zones.map(z => `<option value="${z.name}" ${draft.zone === z.name ? 'selected' : ''}>${z.name} (${z.region})</option>`).join('')}
+          </select>
+        </div>
+        <div class="field"><label>CRM Status</label>
+          <select data-f="crm_status">
+            <option value="unchecked" ${draft.crm_status === 'unchecked' ? 'selected' : ''}>Unchecked</option>
+            <option value="in_crm" ${draft.crm_status === 'in_crm' ? 'selected' : ''}>In CRM</option>
+            <option value="not_in_crm" ${draft.crm_status === 'not_in_crm' ? 'selected' : ''}>Not in CRM</option>
+          </select>
+        </div>
+        <div class="field"><label>Maps Link</label><input type="text" data-f="maps_link" value="${escapeHTML(draft.maps_link)}" placeholder="https://maps.app.goo.gl/..."></div>
+        <div class="field"><label>Latitude</label><input type="text" data-f="lat" value="${escapeHTML(draft.lat)}" placeholder="e.g. 4.1755"></div>
+        <div class="field"><label>Longitude</label><input type="text" data-f="lng" value="${escapeHTML(draft.lng)}" placeholder="e.g. 73.5093"></div>
+      </div>
+      <div class="field" style="margin-top:var(--space-4);"><label>Notes</label><textarea data-f="notes" rows="2">${escapeHTML(draft.notes)}</textarea></div>
+      <details style="margin-top:var(--space-4);">
+        <summary class="text-xs text-tertiary" style="cursor:pointer;">Raw pasted text</summary>
+        <pre class="mono text-xs text-tertiary" style="white-space:pre-wrap;margin-top:var(--space-2);">${escapeHTML(draft.raw_text)}</pre>
+      </details>
+      <div class="cluster gap-3" style="margin-top:var(--space-6);justify-content:flex-end;">
+        <button class="btn-primary confirm-btn" data-id="${draft.id}">Confirm &amp; Save</button>
+      </div>
+    `;
+    // wire field inputs to update draft object live
+    card.querySelectorAll('[data-f]').forEach(inp => {
+      inp.addEventListener('input', () => { draft[inp.dataset.f] = inp.value; persist(); });
+      inp.addEventListener('change', () => { draft[inp.dataset.f] = inp.value; persist(); });
+    });
+    // Auto-suggest zone once both coordinates are present, based on drawn zone boundaries
+    const latInput = card.querySelector('[data-f="lat"]');
+    const lngInput = card.querySelector('[data-f="lng"]');
+    const zoneSelect = card.querySelector('[data-f="zone"]');
+    function trySuggestZone() {
+      const lat = parseFloat(latInput.value), lng = parseFloat(lngInput.value);
+      if (isNaN(lat) || isNaN(lng)) return;
+      const detected = detectZoneForPoint(lat, lng);
+      if (detected && !draft.zone) {
+        zoneSelect.value = detected;
+        draft.zone = detected;
+        persist();
+        toast(`Zone auto-detected: ${detected}`);
+      }
+    }
+    latInput.addEventListener('change', trySuggestZone);
+    lngInput.addEventListener('change', trySuggestZone);
+    card.querySelector('.discard-btn').addEventListener('click', () => {
+      state.drafts = state.drafts.filter(d => d.id !== draft.id);
+      persist();
+      renderReview();
+      updateNavCounts();
+    });
+    card.querySelector('.confirm-btn').addEventListener('click', () => {
+      if (!draft.business_name) { toast('Business name is required'); return; }
+      if (!draft.intern) { toast('Select an intern before confirming'); return; }
+      commitDraftAsVisit(draft);
+      state.drafts = state.drafts.filter(d => d.id !== draft.id);
+      persist();
+      toast('Visit saved');
+      renderReview();
+      updateNavCounts();
+      refreshSoftwareSuggestions();
+    });
+    list.appendChild(card);
+  });
+}
+
+/* ============================================================
+   VIEW: MAP
+   ============================================================ */
+
+let leafletMap = null;
+let zoneDrawMode = false;
+let zoneDrawPoints = [];
+let zoneDrawLayer = null;
+let zoneLayersGroup = null;
+let markersGroup = null;
+let zoneEditMode = false;
+let zoneEditingName = null;
+let zoneEditPoints = [];
+let zoneEditLayer = null;
+
+function renderMap() {
+  const el = document.getElementById('view-map');
+
+  // Always tear down any previous Leaflet instance before rebuilding the
+  // container. Leaflet breaks if its container div is replaced/hidden
+  // without calling remove() first — this is what caused the black screen
+  // when navigating away and back.
+  if (leafletMap) {
+    leafletMap.remove();
+    leafletMap = null;
+  }
+  zoneDrawMode = false;
+  zoneDrawPoints = [];
+  zoneDrawLayer = null;
+
+  if (typeof L === 'undefined') {
+    el.innerHTML = `
+      <div class="view-header"><div><h2>Map</h2><p>All outlets with recorded coordinates.</p></div></div>
+      <div class="card empty-state">
+        <h3 style="font-size:var(--text-lg);">Map library couldn't load</h3>
+        <p>This page loads the map library (Leaflet) from a CDN, which needs an internet connection the first time and can be blocked by strict network settings or ad-blockers. Check your connection and reload, or view outlet locations from the <strong>Outlets</strong> tab instead.</p>
+      </div>`;
+    return;
+  }
+
+  el.innerHTML = `
+    <div class="view-header">
+      <div><h2>Map</h2><p>Pins show outlets. Draw zone boundaries directly on the map — outlets inside a zone are tagged automatically.</p></div>
+      <div class="cluster gap-3">
+        <select id="mapColorMode" style="min-width:180px;">
+          <option value="crm">Color by CRM status</option>
+          <option value="software">Color by software</option>
+          <option value="zone">Color by zone</option>
+        </select>
+        <button class="btn-ghost btn-sm" id="drawZoneBtn">Draw Zone</button>
+        <button class="btn-ghost btn-sm" id="editZoneBtn">Edit Zone</button>
+      </div>
+    </div>
+    <div id="drawBanner" class="card" style="display:none;margin-bottom:var(--space-4);background:var(--color-accent-subtle);border-color:var(--color-accent);">
+      <p class="text-sm">Click points on the map to trace a zone boundary (min. 3 points). <strong id="pointCount">0</strong> points placed.</p>
+      <div class="cluster gap-3" style="margin-top:var(--space-3);">
+        <button class="btn-primary btn-sm" id="finishZoneBtn" disabled>Finish &amp; Name Zone</button>
+        <button class="btn-ghost btn-sm" id="undoPointBtn">Undo Last Point</button>
+        <button class="btn-ghost btn-sm" id="cancelZoneBtn">Cancel</button>
+      </div>
+    </div>
+    <div id="editBanner" class="card" style="display:none;margin-bottom:var(--space-4);background:var(--color-accent-subtle);border-color:var(--color-accent);">
+      <p class="text-sm">Editing <strong id="editingZoneName"></strong>. Drag a point to move it, drag a small dot on an edge to add a point there, right-click a point to remove it.</p>
+      <div class="cluster gap-3" style="margin-top:var(--space-3);">
+        <button class="btn-primary btn-sm" id="saveZoneEditBtn">Save Changes</button>
+        <button class="btn-ghost btn-sm" id="cancelZoneEditBtn">Cancel</button>
+      </div>
+    </div>
+    <div class="card" style="padding:0;overflow:hidden;position:relative;">
+      <div id="mapContainer" style="height:520px;"></div>
+    </div>
+    <div class="stack gap-3" id="zoneLegend" style="margin-top:var(--space-6);"></div>
+  `;
+
+  const sel = document.getElementById('mapColorMode');
+  sel.style.background = 'var(--color-bg-muted)';
+  sel.style.border = '1px solid var(--color-border)';
+  sel.style.borderRadius = 'var(--radius-sm)';
+  sel.style.padding = 'var(--space-2) var(--space-3)';
+  sel.style.fontSize = 'var(--text-sm)';
+  sel.style.color = 'var(--color-text-primary)';
+  sel.addEventListener('change', drawMap);
+
+  document.getElementById('drawZoneBtn').addEventListener('click', toggleZoneDrawMode);
+  document.getElementById('finishZoneBtn').addEventListener('click', finishZoneDraw);
+  document.getElementById('undoPointBtn').addEventListener('click', undoZonePoint);
+  document.getElementById('cancelZoneBtn').addEventListener('click', cancelZoneDraw);
+  document.getElementById('editZoneBtn').addEventListener('click', openEditZonePicker);
+  document.getElementById('saveZoneEditBtn').addEventListener('click', saveZoneEdit);
+  document.getElementById('cancelZoneEditBtn').addEventListener('click', cancelZoneEdit);
+
+  setTimeout(drawMap, 0);
+}
+
+function colorForCRM(status) {
+  if (status === 'in_crm') return '#3A9E5F';
+  if (status === 'not_in_crm') return '#DC2626';
+  return '#8A8A8A';
+}
+const SOFTWARE_COLORS = { 'Ewity': '#8B0000', 'No POS / Manual': '#8A8A8A', 'Foodics': '#3A6EA5', 'Other POS': '#D97706', 'Unknown': '#4A4A4A' };
+function colorForSoftware(sw) {
+  return SOFTWARE_COLORS[sw] || '#4A4A4A';
+}
+const ZONE_COLOR_PALETTE = ['#8B0000', '#3A6EA5', '#3A9E5F', '#D97706', '#6B4E9E', '#B5451F', '#2E8B8B', '#A8508A'];
+function colorForZone(zoneName) {
+  const idx = state.zones.findIndex(z => z.name === zoneName);
+  if (idx === -1) return '#6B6B6B';
+  return ZONE_COLOR_PALETTE[idx % ZONE_COLOR_PALETTE.length];
+}
+
+/* ── Point-in-polygon (ray casting) — used to auto-detect an outlet's zone
+   from its coordinates against drawn zone boundaries ── */
+function pointInPolygon(lat, lng, polygon) {
+  let inside = false;
+  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+    const xi = polygon[i][0], yi = polygon[i][1];
+    const xj = polygon[j][0], yj = polygon[j][1];
+    const intersect = ((yi > lng) !== (yj > lng)) &&
+      (lat < (xj - xi) * (lng - yi) / (yj - yi) + xi);
+    if (intersect) inside = !inside;
+  }
+  return inside;
+}
+
+function detectZoneForPoint(lat, lng) {
+  for (const z of state.zones) {
+    if (z.polygon && z.polygon.length >= 3 && pointInPolygon(lat, lng, z.polygon)) {
+      return z.name;
+    }
+  }
+  return null;
+}
+
+/* Re-run zone detection across all outlets that have coordinates.
+   Called after a zone boundary is drawn/edited so existing pins
+   update live rather than waiting for their next visit. */
+function recalculateOutletZones() {
+  let changed = 0;
+  state.outlets.forEach(o => {
+    if (o.lat && o.lng) {
+      const lat = parseFloat(o.lat), lng = parseFloat(o.lng);
+      if (!isNaN(lat) && !isNaN(lng)) {
+        const detected = detectZoneForPoint(lat, lng);
+        if (detected && detected !== o.zone) {
+          o.zone = detected;
+          o.region = zoneRegion(detected);
+          changed++;
+        }
+      }
+    }
+  });
+  if (changed > 0) persist();
+  return changed;
+}
+
+function toggleZoneDrawMode() {
+  if (zoneEditMode) cancelZoneEdit();
+  zoneDrawMode = !zoneDrawMode;
+  zoneDrawPoints = [];
+  const banner = document.getElementById('drawBanner');
+  const btn = document.getElementById('drawZoneBtn');
+  banner.style.display = zoneDrawMode ? 'block' : 'none';
+  btn.textContent = zoneDrawMode ? 'Cancel Drawing' : 'Draw Zone';
+  updatePointCount();
+  redrawZoneDrawLayer();
+  if (leafletMap) {
+    leafletMap.getContainer().style.cursor = zoneDrawMode ? 'crosshair' : '';
+  }
+}
+
+function cancelZoneDraw() {
+  zoneDrawMode = false;
+  zoneDrawPoints = [];
+  document.getElementById('drawBanner').style.display = 'none';
+  document.getElementById('drawZoneBtn').textContent = 'Draw Zone';
+  redrawZoneDrawLayer();
+  if (leafletMap) leafletMap.getContainer().style.cursor = '';
+}
+
+function undoZonePoint() {
+  zoneDrawPoints.pop();
+  updatePointCount();
+  redrawZoneDrawLayer();
+}
+
+function updatePointCount() {
+  const el = document.getElementById('pointCount');
+  if (el) el.textContent = zoneDrawPoints.length;
+  const finishBtn = document.getElementById('finishZoneBtn');
+  if (finishBtn) finishBtn.disabled = zoneDrawPoints.length < 3;
+}
+
+function redrawZoneDrawLayer() {
+  if (!leafletMap) return;
+  if (zoneDrawLayer) { leafletMap.removeLayer(zoneDrawLayer); zoneDrawLayer = null; }
+  if (zoneDrawPoints.length === 0) return;
+  const group = L.layerGroup();
+  zoneDrawPoints.forEach(p => {
+    L.circleMarker(p, { radius: 5, color: '#F5EAEA', fillColor: '#8B0000', fillOpacity: 1, weight: 2 }).addTo(group);
+  });
+  if (zoneDrawPoints.length > 1) {
+    L.polyline(zoneDrawPoints, { color: '#8B0000', weight: 2, dashArray: '6,6' }).addTo(group);
+  }
+  if (zoneDrawPoints.length > 2) {
+    L.polygon(zoneDrawPoints, { color: '#8B0000', weight: 2, fillOpacity: 0.15 }).addTo(group);
+  }
+  group.addTo(leafletMap);
+  zoneDrawLayer = group;
+}
+
+function finishZoneDraw() {
+  if (zoneDrawPoints.length < 3) return;
+  const modal = document.getElementById('modalContent');
+  modal.innerHTML = `
+    <h3>Name This Zone</h3>
+    <div class="stack gap-4" style="margin-top:var(--space-4);">
+      <div class="field"><label>Zone Name (neighbourhood)</label><input type="text" id="newZoneNameInput" placeholder="e.g. Maafannu"></div>
+      <div class="field"><label>Region (island)</label><input type="text" id="newZoneRegionInput" placeholder="e.g. Malé" list="regionSuggestions">
+        <datalist id="regionSuggestions">${[...new Set(state.zones.map(z => z.region))].map(r => `<option value="${escapeHTML(r)}">`).join('')}</datalist>
+      </div>
+    </div>
+    <div class="cluster gap-3" style="margin-top:var(--space-6);justify-content:flex-end;">
+      <button class="btn-ghost btn-sm" id="closeModalBtn">Cancel</button>
+      <button class="btn-primary btn-sm" id="saveZonePolygonBtn">Save Zone</button>
+    </div>
+  `;
+  document.getElementById('modalOverlay').classList.add('active');
+  document.getElementById('closeModalBtn').addEventListener('click', closeModal);
+  document.getElementById('saveZonePolygonBtn').addEventListener('click', () => {
+    const name = document.getElementById('newZoneNameInput').value.trim();
+    const region = document.getElementById('newZoneRegionInput').value.trim();
+    if (!name || !region) { toast('Zone name and region are both required'); return; }
+    const existing = state.zones.find(z => z.name === name);
+    if (existing) {
+      existing.region = region;
+      existing.polygon = zoneDrawPoints.slice();
+    } else {
+      state.zones.push({ name, region, polygon: zoneDrawPoints.slice() });
+    }
+    persist();
+    const changed = recalculateOutletZones();
+    closeModal();
+    cancelZoneDraw();
+    toast(`Zone "${name}" saved${changed ? ` — ${changed} outlet(s) re-tagged` : ''}`);
+    drawMap();
+  });
+}
+
+/* ============================================================
+   ZONE BOUNDARY EDITING — drag vertices, insert via midpoint
+   handles, remove via right-click. Pure Leaflet, no plugins:
+   vertices are draggable L.marker instances (circleMarker can't
+   be dragged), midpoints are smaller markers that promote
+   themselves into a real vertex on click.
+   ============================================================ */
+
+function openEditZonePicker() {
+  const editable = state.zones.filter(z => z.polygon && z.polygon.length >= 3);
+  if (editable.length === 0) {
+    toast('No drawn zone boundaries to edit yet — use Draw Zone first');
+    return;
+  }
+  const modal = document.getElementById('modalContent');
+  modal.innerHTML = `
+    <div class="cluster gap-3" style="justify-content:space-between;margin-bottom:var(--space-6);">
+      <h3>Edit Which Zone?</h3>
+      <button class="btn-ghost btn-sm" id="closeModalBtn">Close</button>
+    </div>
+    <div class="stack gap-2">
+      ${editable.map(z => `<button class="btn-ghost pick-zone-edit-btn" data-zone="${escapeHTML(z.name)}" style="justify-content:flex-start;">${escapeHTML(z.name)} <span class="text-tertiary">(${escapeHTML(z.region)})</span></button>`).join('')}
+    </div>
+  `;
+  document.getElementById('modalOverlay').classList.add('active');
+  document.getElementById('closeModalBtn').addEventListener('click', closeModal);
+  document.querySelectorAll('.pick-zone-edit-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      closeModal();
+      startZoneEdit(btn.dataset.zone);
+    });
+  });
+}
+
+function startZoneEdit(zoneName) {
+  const zone = state.zones.find(z => z.name === zoneName);
+  if (!zone || !zone.polygon) return;
+  if (zoneDrawMode) cancelZoneDraw();
+
+  zoneEditMode = true;
+  zoneEditingName = zoneName;
+  zoneEditPoints = zone.polygon.map(p => [p[0], p[1]]);
+
+  document.getElementById('editBanner').style.display = 'block';
+  document.getElementById('editingZoneName').textContent = zoneName;
+
+  drawMap(); // redraw so the static polygon for this zone is hidden while editing
+  redrawZoneEditLayer();
+}
+
+function cancelZoneEdit() {
+  zoneEditMode = false;
+  zoneEditingName = null;
+  zoneEditPoints = [];
+  if (zoneEditLayer && leafletMap) { leafletMap.removeLayer(zoneEditLayer); zoneEditLayer = null; }
+  const banner = document.getElementById('editBanner');
+  if (banner) banner.style.display = 'none';
+  drawMap();
+}
+
+function saveZoneEdit() {
+  if (zoneEditPoints.length < 3) { toast('A zone needs at least 3 points'); return; }
+  const zone = state.zones.find(z => z.name === zoneEditingName);
+  if (!zone) { cancelZoneEdit(); return; }
+  zone.polygon = zoneEditPoints.slice();
+  persist();
+  const changed = recalculateOutletZones();
+  const name = zoneEditingName;
+  cancelZoneEdit();
+  toast(`"${name}" boundary updated${changed ? ` — ${changed} outlet(s) re-tagged` : ''}`);
+}
+
+function vertexIcon() {
+  const color = colorForZone(zoneEditingName);
+  return L.divIcon({
+    className: '',
+    html: `<div style="width:14px;height:14px;border-radius:50%;background:${color};border:2px solid #fff;box-shadow:0 1px 3px rgba(0,0,0,0.5);cursor:grab;"></div>`,
+    iconSize: [14, 14], iconAnchor: [7, 7]
+  });
+}
+function midpointIcon() {
+  return L.divIcon({
+    className: '',
+    html: `<div style="width:9px;height:9px;border-radius:50%;background:rgba(255,255,255,0.85);border:1px solid #8B0000;cursor:copy;"></div>`,
+    iconSize: [9, 9], iconAnchor: [4, 4]
+  });
+}
+
+function redrawZoneEditLayer() {
+  if (!leafletMap) return;
+  if (zoneEditLayer) { leafletMap.removeLayer(zoneEditLayer); zoneEditLayer = null; }
+  if (zoneEditPoints.length === 0) return;
+
+  const group = L.layerGroup();
+  const color = colorForZone(zoneEditingName);
+
+  // Live polygon preview of the shape being edited
+  L.polygon(zoneEditPoints, { color, weight: 2, fillOpacity: 0.15, dashArray: '5,5' }).addTo(group);
+
+  // Draggable vertex markers
+  zoneEditPoints.forEach((pt, idx) => {
+    const marker = L.marker(pt, { icon: vertexIcon(), draggable: true }).addTo(group);
+    marker.on('drag', e => {
+      const ll = e.target.getLatLng();
+      zoneEditPoints[idx] = [ll.lat, ll.lng];
+    });
+    marker.on('dragend', () => {
+      redrawZoneEditLayer();
+    });
+    marker.on('contextmenu', e => {
+      e.originalEvent.preventDefault();
+      if (zoneEditPoints.length <= 3) { toast('A zone needs at least 3 points'); return; }
+      zoneEditPoints.splice(idx, 1);
+      redrawZoneEditLayer();
+    });
+  });
+
+  // Midpoint markers between each pair of adjacent vertices — clicking
+  // one inserts a new real vertex there
+  for (let i = 0; i < zoneEditPoints.length; i++) {
+    const a = zoneEditPoints[i];
+    const b = zoneEditPoints[(i + 1) % zoneEditPoints.length];
+    const mid = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
+    const midMarker = L.marker(mid, { icon: midpointIcon() }).addTo(group);
+    midMarker.on('click', () => {
+      zoneEditPoints.splice(i + 1, 0, mid);
+      redrawZoneEditLayer();
+    });
+  }
+
+  group.addTo(leafletMap);
+  zoneEditLayer = group;
+}
+
+function drawMap() {
+  if (typeof L === 'undefined') return;
+  try {
+    drawMapInner();
+  } catch (err) {
+    console.error('Map render failed:', err);
+    const container = document.getElementById('mapContainer');
+    if (container) {
+      container.insertAdjacentHTML('beforeend',
+        '<div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);z-index:1000;background:var(--color-bg-subtle);padding:var(--space-4) var(--space-6);border-radius:var(--radius-md);color:var(--color-text-secondary);font-size:14px;max-width:320px;text-align:center;">Map failed to render — this can happen if map tiles are blocked by your network. Outlet data is still safe; use the Outlets tab.</div>');
+    }
+  }
+}
+
+function drawMapInner() {
+  const modeSel = document.getElementById('mapColorMode');
+  const mode = modeSel ? modeSel.value : 'crm';
+  const withCoords = state.outlets.filter(o => o.lat && o.lng && !isNaN(parseFloat(o.lat)) && !isNaN(parseFloat(o.lng)));
+
+  if (!leafletMap) {
+    leafletMap = L.map('mapContainer', { scrollWheelZoom: true }).setView([4.1755, 73.5093], 12);
+    L.tileLayer(mapTileURL(), {
+      attribution: '&copy; OpenStreetMap &copy; CARTO',
+      maxZoom: 19
+    }).addTo(leafletMap);
+
+    leafletMap.on('click', e => {
+      if (!zoneDrawMode) return;
+      zoneDrawPoints.push([e.latlng.lat, e.latlng.lng]);
+      updatePointCount();
+      redrawZoneDrawLayer();
+    });
+  }
+
+  // Draw zone boundary polygons (existing, saved zones). The zone currently
+  // being edited is skipped here — its live shape is drawn by the edit layer instead.
+  if (zoneLayersGroup) { leafletMap.removeLayer(zoneLayersGroup); }
+  zoneLayersGroup = L.layerGroup();
+  state.zones.forEach(z => {
+    if (z.polygon && z.polygon.length >= 3 && z.name !== zoneEditingName) {
+      const color = colorForZone(z.name);
+      const poly = L.polygon(z.polygon, { color, weight: 2, fillOpacity: 0.08 }).addTo(zoneLayersGroup);
+      poly.bindTooltip(`${z.name} (${z.region})`, { sticky: true });
+      poly.bindPopup(`<div style="text-align:center;"><strong>${escapeHTML(z.name)}</strong><br>${escapeHTML(z.region)}<br><button class="popup-edit-zone-btn" data-zone="${escapeHTML(z.name)}" style="margin-top:6px;padding:4px 10px;border-radius:999px;background:#8B0000;color:#fff;border:none;font-size:12px;cursor:pointer;">Edit Boundary</button></div>`);
+    }
+  });
+  zoneLayersGroup.addTo(leafletMap);
+
+  if (!leafletMap._zoneEditPopupWired) {
+    leafletMap.on('popupopen', e => {
+      const node = e.popup.getElement ? e.popup.getElement() : (e.popup._contentNode || null);
+      const btn = node && node.querySelector('.popup-edit-zone-btn');
+      if (btn) {
+        btn.addEventListener('click', () => {
+          leafletMap.closePopup();
+          startZoneEdit(btn.dataset.zone);
+        });
+      }
+    });
+    leafletMap._zoneEditPopupWired = true;
+  }
+
+  // Draw outlet markers
+  if (markersGroup) { leafletMap.removeLayer(markersGroup); }
+  markersGroup = L.layerGroup();
+
+  renderZoneLegend();
+
+  if (withCoords.length === 0 && state.zones.every(z => !z.polygon)) {
+    document.getElementById('mapContainer').insertAdjacentHTML('beforeend',
+      '<div id="mapEmptyMsg" style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);z-index:1000;background:var(--color-bg-subtle);padding:var(--space-4) var(--space-6);border-radius:var(--radius-md);color:var(--color-text-secondary);font-size:14px;">No outlets or zones plotted yet</div>');
+  }
+
+  const bounds = [];
+  withCoords.forEach(o => {
+    const lat = parseFloat(o.lat), lng = parseFloat(o.lng);
+    let color;
+    if (mode === 'software') color = colorForSoftware(o.current_software);
+    else if (mode === 'zone') color = colorForZone(o.zone);
+    else color = colorForCRM(o.crm_status);
+    const marker = L.circleMarker([lat, lng], {
+      radius: 8, fillColor: color, color: markerStrokeColor(), weight: 2, fillOpacity: 0.9
+    }).addTo(markersGroup);
+    marker.bindPopup(`
+      <strong>${escapeHTML(o.business_name)}</strong><br>
+      ${escapeHTML(o.business_type || '')}<br>
+      Zone: ${escapeHTML(o.zone || '—')}<br>
+      Software: ${escapeHTML(o.current_software || '—')}<br>
+      CRM: ${escapeHTML(o.crm_status)}<br>
+      Last visit: ${o.last_visited_at ? escapeHTML(o.last_visited_at) + ' by ' + escapeHTML(o.last_visited_by || '—') : 'Not visited yet'}
+    `);
+    bounds.push([lat, lng]);
+  });
+  markersGroup.addTo(leafletMap);
+
+  // Fit bounds to outlets, or to zone polygons if no outlets yet
+  if (bounds.length > 0) {
+    leafletMap.fitBounds(bounds, { padding: [40, 40] });
+  } else {
+    const zoneBounds = [];
+    state.zones.forEach(z => { if (z.polygon) zoneBounds.push(...z.polygon); });
+    if (zoneBounds.length > 0) leafletMap.fitBounds(zoneBounds, { padding: [40, 40] });
+  }
+
+  // Fix any stale sizing from the container having been hidden/re-shown
+  setTimeout(() => { if (leafletMap) leafletMap.invalidateSize(); }, 50);
+}
+
+function renderZoneLegend() {
+  const el = document.getElementById('zoneLegend');
+  if (!el) return;
+  if (state.zones.length === 0) { el.innerHTML = ''; return; }
+  el.innerHTML = `
+    <p class="text-xs text-tertiary" style="text-transform:uppercase;letter-spacing:0.03em;">Zones</p>
+    <div class="cluster gap-4">
+      ${state.zones.map(z => `
+        <div class="cluster gap-2">
+          <span style="width:10px;height:10px;border-radius:50%;background:${colorForZone(z.name)};display:inline-block;"></span>
+          <span class="text-xs text-muted">${escapeHTML(z.name)} <span class="text-tertiary">(${escapeHTML(z.region)})</span>${!z.polygon ? ' — no boundary drawn' : ''}</span>
+        </div>
+      `).join('')}
+    </div>
+  `;
+}
+
+/* ============================================================
+   VIEW: OUTLETS
+   ============================================================ */
+
+function renderOutlets() {
+  const el = document.getElementById('view-outlets');
+  const sorted = [...state.outlets].sort((a, b) => (b.last_visited_at || '').localeCompare(a.last_visited_at || ''));
+
+  el.innerHTML = `
+    <div class="view-header">
+      <div><h2>Outlets</h2><p>${state.outlets.length} outlet${state.outlets.length !== 1 ? 's' : ''} tracked. Click a row for full visit history.</p></div>
+      <div class="cluster gap-3">
+        <input type="text" id="outletSearch" placeholder="Search by name..." style="background:var(--color-bg-muted);border:1px solid var(--color-border);border-radius:var(--radius-sm);padding:var(--space-2) var(--space-4);font-size:var(--text-sm);color:var(--color-text-primary);min-width:220px;">
+        <button class="btn-primary btn-sm" id="addOutletBtn">+ Add Outlet</button>
+      </div>
+    </div>
+    <div class="card" style="padding:0;overflow-x:auto;">
+      ${sorted.length === 0 ? '<div class="empty-state"><p>No outlets yet. Confirm visits in the Review Queue, or add one manually.</p></div>' : `
+      <table id="outletsTable">
+        <thead><tr>
+          <th>Business</th><th>Type</th><th>Zone / Region</th><th>Software</th><th>CRM</th><th>Last Visit</th><th>By</th><th>Visits</th>
+        </tr></thead>
+        <tbody>
+          ${sorted.map(o => `
+            <tr class="outlet-row" data-id="${o.id}" style="cursor:pointer;">
+              <td><strong>${escapeHTML(o.business_name)}</strong></td>
+              <td class="text-muted">${escapeHTML(o.business_type || '—')}</td>
+              <td class="text-muted">${escapeHTML(o.zone || '—')}${o.region ? ' / ' + escapeHTML(o.region) : ''}</td>
+              <td>${escapeHTML(o.current_software || '—')}</td>
+              <td>${crmPill(o.crm_status)}</td>
+              <td class="text-muted">${o.last_visited_at ? escapeHTML(o.last_visited_at) : '<span class="pill pill-warning">Not visited yet</span>'}</td>
+              <td class="text-muted">${escapeHTML(o.last_visited_by || '—')}</td>
+              <td class="text-muted">${outletVisitCount(o.id)}</td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>`}
+    </div>
+  `;
+
+  document.getElementById('addOutletBtn').addEventListener('click', openAddOutletModal);
+
+  document.getElementById('outletSearch') && document.getElementById('outletSearch').addEventListener('input', e => {
+    const q = normalizeName(e.target.value);
+    document.querySelectorAll('#outletsTable tbody tr').forEach(row => {
+      const id = row.dataset.id;
+      const outlet = state.outlets.find(o => o.id === id);
+      row.style.display = normalizeName(outlet.business_name).includes(q) ? '' : 'none';
+    });
+  });
+
+  document.querySelectorAll('.outlet-row').forEach(row => {
+    row.addEventListener('click', () => openOutletDetail(row.dataset.id));
+  });
+}
+
+function crmPill(status) {
+  if (status === 'in_crm') return '<span class="pill pill-success">In CRM</span>';
+  if (status === 'not_in_crm') return '<span class="pill pill-error">Not in CRM</span>';
+  return '<span class="pill pill-neutral">Unchecked</span>';
+}
+
+/* ── Manual "unvisited" outlet creation ──
+   Adds an outlet with no visit record attached. Shows as "Not visited yet"
+   until an intern actually logs a visit against it (either by parsing a
+   Telegram message that matches the name, or by confirming a manual visit). */
+function openAddOutletModal() {
+  const modal = document.getElementById('modalContent');
+  modal.innerHTML = `
+    <div class="cluster gap-3" style="justify-content:space-between;margin-bottom:var(--space-6);">
+      <h3>Add Outlet</h3>
+      <button class="btn-ghost btn-sm" id="closeModalBtn">Close</button>
+    </div>
+    <p class="text-sm text-muted" style="margin-bottom:var(--space-6);">For places your team knows about but hasn't visited yet. No visit is logged — this just adds the outlet to the map and list.</p>
+    <div class="grid-2 gap-4">
+      <div class="field"><label>Business Name *</label><input type="text" id="newOutletName" placeholder="e.g. Kavizo"></div>
+      <div class="field"><label>Business Type</label><input type="text" id="newOutletType" placeholder="e.g. Restaurant"></div>
+      <div class="field"><label>Zone</label>
+        <select id="newOutletZone">
+          <option value="">— select —</option>
+          ${state.zones.map(z => `<option value="${z.name}">${z.name} (${z.region})</option>`).join('')}
+        </select>
+      </div>
+      <div class="field"><label>Phone</label><input type="text" id="newOutletPhone" placeholder="Optional"></div>
+      <div class="field"><label>Maps Link</label><input type="text" id="newOutletMapsLink" placeholder="https://maps.app.goo.gl/..."></div>
+      <div class="field"><label>Latitude</label><input type="text" id="newOutletLat" placeholder="e.g. 4.1755"></div>
+      <div class="field"><label>Longitude</label><input type="text" id="newOutletLng" placeholder="e.g. 73.5093"></div>
+      <div class="field"><label>Known Software (if any)</label><input type="text" id="newOutletSoftware" list="softwareSuggestions" placeholder="Leave blank if unknown"></div>
+    </div>
+    <div class="cluster gap-3" style="margin-top:var(--space-6);justify-content:flex-end;">
+      <button class="btn-primary btn-sm" id="saveNewOutletBtn">Add Outlet</button>
+    </div>
+  `;
+  document.getElementById('modalOverlay').classList.add('active');
+  document.getElementById('closeModalBtn').addEventListener('click', closeModal);
+
+  const latInput = document.getElementById('newOutletLat');
+  const lngInput = document.getElementById('newOutletLng');
+  const zoneSelect = document.getElementById('newOutletZone');
+  function trySuggestZone() {
+    const lat = parseFloat(latInput.value), lng = parseFloat(lngInput.value);
+    if (isNaN(lat) || isNaN(lng)) return;
+    const detected = detectZoneForPoint(lat, lng);
+    if (detected && !zoneSelect.value) {
+      zoneSelect.value = detected;
+      toast(`Zone auto-detected: ${detected}`);
+    }
+  }
+  latInput.addEventListener('change', trySuggestZone);
+  lngInput.addEventListener('change', trySuggestZone);
+
+  document.getElementById('saveNewOutletBtn').addEventListener('click', () => {
+    const name = document.getElementById('newOutletName').value.trim();
+    if (!name) { toast('Business name is required'); return; }
+    if (findMatchingOutlet(name)) { toast('An outlet with this name already exists'); return; }
+
+    const zone = document.getElementById('newOutletZone').value;
+    const outlet = {
+      id: uid(),
+      business_name: name,
+      business_type: document.getElementById('newOutletType').value.trim(),
+      region: zoneRegion(zone),
+      zone: zone,
+      lat: document.getElementById('newOutletLat').value.trim(),
+      lng: document.getElementById('newOutletLng').value.trim(),
+      maps_link: document.getElementById('newOutletMapsLink').value.trim(),
+      phone: document.getElementById('newOutletPhone').value.trim(),
+      current_software: document.getElementById('newOutletSoftware').value.trim(),
+      last_visited_at: '',
+      last_visited_by: '',
+      crm_status: 'unchecked'
+    };
+    state.outlets.push(outlet);
+    persist();
+    toast(`${name} added — not visited yet`);
+    closeModal();
+    renderOutlets();
+    refreshSoftwareSuggestions();
+  });
+}
+
+function openOutletDetail(outletId) {
+  const outlet = state.outlets.find(o => o.id === outletId);
+  if (!outlet) return;
+  const visits = state.visits.filter(v => v.outlet_id === outletId).sort((a, b) => b.visited_at.localeCompare(a.visited_at));
+
+  const modal = document.getElementById('modalContent');
+  modal.innerHTML = `
+    <div class="cluster gap-3" style="justify-content:space-between;align-items:flex-start;margin-bottom:var(--space-2);">
+      <h3>${escapeHTML(outlet.business_name)}</h3>
+      <button class="btn-ghost btn-sm" id="closeModalBtn">Close</button>
+    </div>
+    <p class="text-sm text-muted" style="margin-bottom:var(--space-6);">${escapeHTML(outlet.business_type || 'Type unspecified')} · ${escapeHTML(outlet.zone || 'No zone')} ${outlet.region ? '/ ' + escapeHTML(outlet.region) : ''}</p>
+
+    <div class="grid-2 gap-4" style="margin-bottom:var(--space-6);">
+      <div class="field"><label>Current Software</label>
+        <input type="text" id="editSoftware" value="${escapeHTML(outlet.current_software || '')}" list="softwareSuggestions" placeholder="e.g. Ewity, POSbytz, manual">
+      </div>
+      <div class="field"><label>CRM Status</label>
+        <select id="editCrm">
+          <option value="unchecked" ${outlet.crm_status === 'unchecked' ? 'selected' : ''}>Unchecked</option>
+          <option value="in_crm" ${outlet.crm_status === 'in_crm' ? 'selected' : ''}>In CRM</option>
+          <option value="not_in_crm" ${outlet.crm_status === 'not_in_crm' ? 'selected' : ''}>Not in CRM</option>
+        </select>
+      </div>
+      <div class="field"><label>Phone</label><input type="text" id="editPhone" value="${escapeHTML(outlet.phone || '')}"></div>
+      <div class="field"><label>Maps Link</label><input type="text" id="editMapsLink" value="${escapeHTML(outlet.maps_link || '')}"></div>
+      <div class="field"><label>Latitude</label><input type="text" id="editLat" value="${escapeHTML(outlet.lat || '')}"></div>
+      <div class="field"><label>Longitude</label><input type="text" id="editLng" value="${escapeHTML(outlet.lng || '')}"></div>
+    </div>
+    <button class="btn-primary btn-sm" id="saveOutletBtn">Save Changes</button>
+
+    <h4 style="font-size:var(--text-lg);margin:var(--space-8) 0 var(--space-4);">Visit History (${visits.length})</h4>
+    <div class="stack gap-3">
+      ${visits.length === 0 ? '<p class="text-sm text-tertiary">No visits logged.</p>' : visits.map(v => `
+        <div style="padding:var(--space-4);background:var(--color-bg-muted);border-radius:var(--radius-sm);">
+          <div class="cluster gap-3" style="justify-content:space-between;">
+            <strong class="text-sm">${escapeHTML(v.visited_at)} — ${escapeHTML(v.intern)}</strong>
+            ${crmPill(v.crm_status_at_time)}
+          </div>
+          ${v.software_reported ? `<p class="text-sm text-muted" style="margin-top:var(--space-1);">Software: ${escapeHTML(v.software_reported)}</p>` : ''}
+          ${v.notes ? `<p class="text-sm" style="margin-top:var(--space-1);">${escapeHTML(v.notes)}</p>` : ''}
+        </div>
+      `).join('')}
+    </div>
+  `;
+  document.getElementById('modalOverlay').classList.add('active');
+  document.getElementById('closeModalBtn').addEventListener('click', closeModal);
+  document.getElementById('saveOutletBtn').addEventListener('click', () => {
+    outlet.current_software = document.getElementById('editSoftware').value;
+    outlet.crm_status = document.getElementById('editCrm').value;
+    outlet.phone = document.getElementById('editPhone').value;
+    outlet.maps_link = document.getElementById('editMapsLink').value;
+    outlet.lat = document.getElementById('editLat').value;
+    outlet.lng = document.getElementById('editLng').value;
+    persist();
+    toast('Outlet updated');
+    closeModal();
+    renderOutlets();
+    refreshSoftwareSuggestions();
+  });
+}
+
+function closeModal() {
+  document.getElementById('modalOverlay').classList.remove('active');
+}
+
+/* ============================================================
+   VIEW: INTERN SUMMARY
+   ============================================================ */
+
+function renderInterns() {
+  const el = document.getElementById('view-interns');
+  const rows = state.interns.map(name => {
+    const visits = state.visits.filter(v => v.intern === name);
+    const outletIds = new Set(visits.map(v => v.outlet_id));
+    const zones = new Set();
+    outletIds.forEach(id => {
+      const o = state.outlets.find(o => o.id === id);
+      if (o && o.zone) zones.add(o.zone);
+    });
+    const inCrm = visits.filter(v => v.crm_status_at_time === 'in_crm').length;
+    const pct = visits.length ? Math.round((inCrm / visits.length) * 100) : 0;
+    const lastVisit = visits.length ? visits.map(v => v.visited_at).sort().slice(-1)[0] : '—';
+    return { name, total: visits.length, unique: outletIds.size, zones: zones.size, pct, lastVisit };
+  }).sort((a, b) => b.total - a.total);
+
+  el.innerHTML = `
+    <div class="view-header">
+      <div><h2>Intern Summary</h2><p>Visit volume and CRM completion rate per intern.</p></div>
+    </div>
+    <div class="card" style="padding:0;overflow-x:auto;">
+      ${rows.length === 0 ? '<div class="empty-state"><p>No visits logged yet.</p></div>' : `
+      <table>
+        <thead><tr><th>Intern</th><th>Total Visits</th><th>Unique Outlets</th><th>Zones Covered</th><th>% In CRM</th><th>Last Visit</th></tr></thead>
+        <tbody>
+          ${rows.map(r => `
+            <tr>
+              <td><strong>${escapeHTML(r.name)}</strong></td>
+              <td>${r.total}</td>
+              <td>${r.unique}</td>
+              <td>${r.zones}</td>
+              <td>
+                <div class="cluster gap-2">
+                  <div class="bar-track" style="width:80px;">
+                    <div class="bar-segment" style="width:${r.pct}%;background:${r.pct >= 70 ? 'var(--color-success)' : r.pct >= 40 ? 'var(--color-warning)' : 'var(--color-error)'};"></div>
+                  </div>
+                  <span class="text-xs text-muted">${r.pct}%</span>
+                </div>
+              </td>
+              <td class="text-muted">${escapeHTML(r.lastVisit)}</td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>`}
+    </div>
+
+    <h3 style="font-size:var(--text-xl);margin:var(--space-10) 0 var(--space-4);">Repeat Visits</h3>
+    <p class="text-sm text-muted" style="margin-bottom:var(--space-4);">Outlets visited more than once, across any intern.</p>
+    ${renderRepeatVisitsList()}
+  `;
+}
+
+function renderRepeatVisitsList() {
+  const repeats = state.outlets
+    .map(o => ({ outlet: o, count: outletVisitCount(o.id) }))
+    .filter(x => x.count > 1)
+    .sort((a, b) => b.count - a.count);
+
+  if (repeats.length === 0) {
+    return '<div class="card empty-state"><p>No repeat visits detected yet.</p></div>';
+  }
+  return `
+    <div class="card" style="padding:0;overflow-x:auto;">
+      <table>
+        <thead><tr><th>Business</th><th>Visit Count</th><th>Interns Involved</th><th>Last Visit</th></tr></thead>
+        <tbody>
+          ${repeats.map(r => {
+            const visits = state.visits.filter(v => v.outlet_id === r.outlet.id);
+            const interns = [...new Set(visits.map(v => v.intern))];
+            return `
+              <tr class="outlet-row" data-id="${r.outlet.id}" style="cursor:pointer;">
+                <td><strong>${escapeHTML(r.outlet.business_name)}</strong></td>
+                <td>${r.count}</td>
+                <td class="text-muted">${interns.map(escapeHTML).join(', ')}</td>
+                <td class="text-muted">${escapeHTML(r.outlet.last_visited_at || '—')}</td>
+              </tr>
+            `;
+          }).join('')}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
+/* ============================================================
+   VIEW: SOFTWARE DOMINANCE
+   ============================================================ */
+
+function renderSoftware() {
+  const el = document.getElementById('view-software');
+
+  // Group outlets by zone
+  const zoneGroups = {};
+  state.outlets.forEach(o => {
+    if (!o.zone) return;
+    if (!zoneGroups[o.zone]) zoneGroups[o.zone] = [];
+    zoneGroups[o.zone].push(o);
+  });
+
+  // Group by region (rolled up from zones)
+  const regionGroups = {};
+  state.outlets.forEach(o => {
+    const region = o.region || zoneRegion(o.zone) || 'Unassigned';
+    if (!regionGroups[region]) regionGroups[region] = [];
+    regionGroups[region].push(o);
+  });
+
+  el.innerHTML = `
+    <div class="view-header">
+      <div><h2>Software Dominance</h2><p>Current POS software breakdown by zone and region, based on latest known outlet state.</p></div>
+    </div>
+
+    <h3 style="font-size:var(--text-xl);margin-bottom:var(--space-4);">By Region</h3>
+    <div class="stack gap-4" style="margin-bottom:var(--space-10);">
+      ${Object.keys(regionGroups).length === 0 ? '<div class="card empty-state"><p>No outlets with zones assigned yet.</p></div>' :
+        Object.entries(regionGroups).sort((a,b) => b[1].length - a[1].length).map(([region, outlets]) => softwareBreakdownCard(region, outlets)).join('')}
+    </div>
+
+    <h3 style="font-size:var(--text-xl);margin-bottom:var(--space-4);">By Zone</h3>
+    <div class="stack gap-4">
+      ${Object.keys(zoneGroups).length === 0 ? '<div class="card empty-state"><p>No outlets with zones assigned yet.</p></div>' :
+        Object.entries(zoneGroups).sort((a,b) => b[1].length - a[1].length).map(([zone, outlets]) => softwareBreakdownCard(zone, outlets)).join('')}
+    </div>
+  `;
+}
+
+function softwareBreakdownCard(label, outlets) {
+  // Group by normalized (lowercase, trimmed) key so "Ewity" / "ewity" / "EWITY"
+  // count as one bucket, but keep the most common original spelling for display.
+  const buckets = {}; // key -> { count, labelCounts: {label: n} }
+  outlets.forEach(o => {
+    const raw = (o.current_software || '').trim() || 'Unknown';
+    const key = raw.toLowerCase();
+    if (!buckets[key]) buckets[key] = { count: 0, labelCounts: {} };
+    buckets[key].count++;
+    buckets[key].labelCounts[raw] = (buckets[key].labelCounts[raw] || 0) + 1;
+  });
+  const total = outlets.length;
+  const entries = Object.entries(buckets)
+    .map(([key, b]) => {
+      const displayLabel = Object.entries(b.labelCounts).sort((a, b) => b[1] - a[1])[0][0];
+      return [displayLabel, b.count];
+    })
+    .sort((a, b) => b[1] - a[1]);
+  return `
+    <div class="card">
+      <div class="cluster gap-3" style="justify-content:space-between;margin-bottom:var(--space-4);">
+        <strong>${escapeHTML(label)}</strong>
+        <span class="text-xs text-tertiary">${total} outlet${total !== 1 ? 's' : ''}</span>
+      </div>
+      <div class="bar-row" style="margin-bottom:var(--space-4);">
+        <div class="bar-track">
+          ${entries.map(([sw, count]) => `<div class="bar-segment" style="width:${(count/total*100)}%;background:${colorForSoftware(sw)};" title="${escapeHTML(sw)}: ${count}"></div>`).join('')}
+        </div>
+      </div>
+      <div class="cluster gap-4">
+        ${entries.map(([sw, count]) => `
+          <div class="cluster gap-2">
+            <span style="width:10px;height:10px;border-radius:50%;background:${colorForSoftware(sw)};display:inline-block;"></span>
+            <span class="text-xs text-muted">${escapeHTML(sw)} — ${Math.round(count/total*100)}% (${count})</span>
+          </div>
+        `).join('')}
+      </div>
+    </div>
+  `;
+}
+
+/* ============================================================
+   VIEW: SHIFT ROSTER
+   ============================================================ */
+
+const SHIFTS = ['Morning', 'Afternoon', 'Evening'];
+let rosterDate = new Date().toISOString().slice(0, 10);
+let rosterActiveShift = 'Morning';
+let rosterMap = null;
+
+function renderRoster() {
+  const el = document.getElementById('view-roster');
+  if (rosterMap) { rosterMap.remove(); rosterMap = null; }
+
+  el.innerHTML = `
+    <div class="view-header">
+      <div><h2>Shift Roster</h2><p>Assign interns to zones per shift. Multiple interns can share a zone.</p></div>
+      <div class="field" style="min-width:180px;"><label>Date</label><input type="date" id="rosterDateInput" value="${rosterDate}"></div>
+    </div>
+
+    <div class="cluster gap-2" style="margin-bottom:var(--space-4);" id="shiftToggle">
+      ${SHIFTS.map(s => `<button class="btn-ghost btn-sm shift-toggle-btn" data-shift="${s}" style="${s === rosterActiveShift ? 'background:var(--color-accent);color:var(--color-text-inverse);border-color:var(--color-accent);' : ''}">${s}</button>`).join('')}
+    </div>
+
+    <div class="card" style="padding:0;overflow:hidden;position:relative;margin-bottom:var(--space-8);">
+      <div id="rosterMapContainer" style="height:420px;"></div>
+    </div>
+    <div class="stack gap-3" id="rosterMapLegend" style="margin-bottom:var(--space-10);"></div>
+
+    <h3 style="font-size:var(--text-xl);margin-bottom:var(--space-4);">${rosterActiveShift} Assignments</h3>
+    <div class="stack gap-6" id="shiftBlocks"></div>
+
+    <h3 style="font-size:var(--text-xl);margin:var(--space-10) 0 var(--space-4);">Assigned vs Actual — ${rosterDate}</h3>
+    <div id="assignedVsActual"></div>
+  `;
+  document.getElementById('rosterDateInput').addEventListener('change', e => {
+    rosterDate = e.target.value;
+    renderRoster();
+  });
+  document.querySelectorAll('.shift-toggle-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      rosterActiveShift = btn.dataset.shift;
+      renderRoster();
+    });
+  });
+  renderShiftBlocks();
+  renderAssignedVsActual();
+  setTimeout(drawRosterMap, 0);
+}
+
+/* Distinct colors per intern so the same person reads consistently
+   across the roster map and the legend. */
+const INTERN_COLOR_PALETTE = ['#8B0000', '#3A6EA5', '#3A9E5F', '#D97706', '#6B4E9E', '#B5451F', '#2E8B8B', '#A8508A'];
+function colorForIntern(name) {
+  const idx = state.interns.indexOf(name);
+  if (idx === -1) return '#6B6B6B';
+  return INTERN_COLOR_PALETTE[idx % INTERN_COLOR_PALETTE.length];
+}
+
+function drawRosterMap() {
+  if (typeof L === 'undefined') {
+    const container = document.getElementById('rosterMapContainer');
+    if (container) container.innerHTML = '<div class="empty-state" style="padding:var(--space-8);"><p>Map library unavailable — check your connection. Assignments below still work normally.</p></div>';
+    return;
+  }
+  try {
+    drawRosterMapInner();
+  } catch (err) {
+    console.error('Roster map render failed:', err);
+  }
+}
+
+function drawRosterMapInner() {
+  if (!rosterMap) {
+    rosterMap = L.map('rosterMapContainer', { scrollWheelZoom: true }).setView([4.1755, 73.5093], 12);
+    L.tileLayer(mapTileURL(), {
+      attribution: '&copy; OpenStreetMap &copy; CARTO',
+      maxZoom: 19
+    }).addTo(rosterMap);
+  }
+
+  const dayAssignments = state.assignments.filter(a => a.date === rosterDate && a.shift === rosterActiveShift);
+  // zone -> list of intern names assigned this shift
+  const zoneToInterns = {};
+  dayAssignments.forEach(a => {
+    if (!zoneToInterns[a.zone]) zoneToInterns[a.zone] = [];
+    zoneToInterns[a.zone].push(a.intern);
+  });
+
+  const bounds = [];
+  const zonesWithBoundary = state.zones.filter(z => z.polygon && z.polygon.length >= 3);
+
+  zonesWithBoundary.forEach(z => {
+    const interns = zoneToInterns[z.name] || [];
+    const hasAssignment = interns.length > 0;
+    // If multiple interns share a zone, blend by showing the first intern's
+    // color as fill and listing all names in the tooltip/label.
+    const fillColor = hasAssignment ? colorForIntern(interns[0]) : '#3A3A3A';
+    const poly = L.polygon(z.polygon, {
+      color: hasAssignment ? fillColor : '#555555',
+      weight: hasAssignment ? 3 : 1,
+      fillColor: fillColor,
+      fillOpacity: hasAssignment ? 0.35 : 0.05,
+      dashArray: hasAssignment ? null : '4,4'
+    }).addTo(rosterMap);
+
+    const label = hasAssignment
+      ? `<strong>${escapeHTML(z.name)}</strong><br>${interns.map(escapeHTML).join(', ')}`
+      : `<strong>${escapeHTML(z.name)}</strong><br><span style="opacity:0.7;">Unassigned this shift</span>`;
+    poly.bindTooltip(label, { sticky: true });
+
+    // Place a small label marker at the polygon's rough center for readability
+    if (hasAssignment) {
+      const centerLat = z.polygon.reduce((s, p) => s + p[0], 0) / z.polygon.length;
+      const centerLng = z.polygon.reduce((s, p) => s + p[1], 0) / z.polygon.length;
+      L.marker([centerLat, centerLng], {
+        icon: L.divIcon({
+          className: '',
+          html: `<div style="background:${fillColor};color:#fff;padding:3px 10px;border-radius:999px;font-size:11px;font-weight:600;white-space:nowrap;box-shadow:0 1px 4px rgba(0,0,0,0.4);">${interns.map(escapeHTML).join(', ')}</div>`,
+          iconSize: null
+        })
+      }).addTo(rosterMap);
+    }
+
+    bounds.push(...z.polygon);
+  });
+
+  if (bounds.length > 0) {
+    rosterMap.fitBounds(bounds, { padding: [40, 40] });
+  }
+
+  if (zonesWithBoundary.length === 0) {
+    document.getElementById('rosterMapContainer').insertAdjacentHTML('beforeend',
+      '<div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);z-index:1000;background:var(--color-bg-subtle);padding:var(--space-4) var(--space-6);border-radius:var(--radius-md);color:var(--color-text-secondary);font-size:14px;max-width:280px;text-align:center;">No zone boundaries drawn yet — draw them on the Map tab to see assignments here</div>');
+  }
+
+  setTimeout(() => { if (rosterMap) rosterMap.invalidateSize(); }, 50);
+  renderRosterMapLegend(dayAssignments);
+}
+
+function renderRosterMapLegend(dayAssignments) {
+  const el = document.getElementById('rosterMapLegend');
+  if (!el) return;
+  const internsToday = [...new Set(dayAssignments.map(a => a.intern))];
+  if (internsToday.length === 0) {
+    el.innerHTML = `<p class="text-sm text-tertiary">No one assigned for ${escapeHTML(rosterActiveShift)} yet.</p>`;
+    return;
+  }
+  el.innerHTML = `
+    <div class="cluster gap-4">
+      ${internsToday.map(name => `
+        <div class="cluster gap-2">
+          <span style="width:10px;height:10px;border-radius:50%;background:${colorForIntern(name)};display:inline-block;"></span>
+          <span class="text-xs text-muted">${escapeHTML(name)}</span>
+        </div>
+      `).join('')}
+      <div class="cluster gap-2">
+        <span style="width:10px;height:10px;border-radius:2px;border:1px dashed var(--color-text-tertiary);display:inline-block;"></span>
+        <span class="text-xs text-tertiary">Unassigned zone</span>
+      </div>
+    </div>
+  `;
+}
+
+function renderShiftBlocks() {
+  const container = document.getElementById('shiftBlocks');
+  const rows = state.assignments.filter(a => a.date === rosterDate && a.shift === rosterActiveShift);
+  container.innerHTML = `
+    <div class="card">
+      <div class="cluster gap-3" style="justify-content:space-between;margin-bottom:var(--space-4);">
+        <strong>${rosterActiveShift}</strong>
+        <button class="btn-ghost btn-sm add-assignment-btn" data-shift="${rosterActiveShift}">+ Add Assignment</button>
+      </div>
+      <div class="stack gap-2" id="rows-${rosterActiveShift}">
+        ${rows.length === 0 ? '<p class="text-sm text-tertiary">No assignments yet.</p>' : rows.map(a => `
+          <div class="cluster gap-3" style="justify-content:space-between;padding:var(--space-3) var(--space-4);background:var(--color-bg-muted);border-radius:var(--radius-sm);">
+            <span class="text-sm cluster gap-2">
+              <span style="width:8px;height:8px;border-radius:50%;background:${colorForIntern(a.intern)};display:inline-block;"></span>
+              <strong>${escapeHTML(a.intern)}</strong> → ${escapeHTML(a.zone)}
+            </span>
+            <button class="btn-ghost btn-sm remove-assignment-btn" data-id="${a.id}">Remove</button>
+          </div>
+        `).join('')}
+      </div>
+    </div>
+  `;
+
+  container.querySelectorAll('.add-assignment-btn').forEach(btn => {
+    btn.addEventListener('click', () => openAssignmentModal(btn.dataset.shift));
+  });
+  container.querySelectorAll('.remove-assignment-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      state.assignments = state.assignments.filter(a => a.id !== btn.dataset.id);
+      persist();
+      renderShiftBlocks();
+      renderAssignedVsActual();
+      drawRosterMap();
+    });
+  });
+}
+
+function openAssignmentModal(shift) {
+  const modal = document.getElementById('modalContent');
+  modal.innerHTML = `
+    <div class="cluster gap-3" style="justify-content:space-between;margin-bottom:var(--space-6);">
+      <h3>Assign — ${shift}</h3>
+      <button class="btn-ghost btn-sm" id="closeModalBtn">Close</button>
+    </div>
+    <div class="grid-2 gap-4">
+      <div class="field"><label>Intern</label>
+        <select id="assignIntern">${state.interns.map(i => `<option value="${i}">${i}</option>`).join('')}</select>
+      </div>
+      <div class="field"><label>Zone</label>
+        <select id="assignZone">${state.zones.map(z => `<option value="${z.name}">${z.name} (${z.region})</option>`).join('')}</select>
+      </div>
+    </div>
+    <button class="btn-primary btn-sm" id="saveAssignmentBtn" style="margin-top:var(--space-6);">Add</button>
+  `;
+  document.getElementById('modalOverlay').classList.add('active');
+  document.getElementById('closeModalBtn').addEventListener('click', closeModal);
+  document.getElementById('saveAssignmentBtn').addEventListener('click', () => {
+    state.assignments.push({
+      id: uid(), date: rosterDate, shift,
+      intern: document.getElementById('assignIntern').value,
+      zone: document.getElementById('assignZone').value
+    });
+    persist();
+    closeModal();
+    renderShiftBlocks();
+    renderAssignedVsActual();
+    drawRosterMap();
+  });
+}
+
+function renderAssignedVsActual() {
+  const container = document.getElementById('assignedVsActual');
+  const dayAssignments = state.assignments.filter(a => a.date === rosterDate);
+  const dayVisits = state.visits.filter(v => v.visited_at === rosterDate);
+
+  if (dayAssignments.length === 0) {
+    container.innerHTML = '<div class="card empty-state"><p>No assignments set for this date yet.</p></div>';
+    return;
+  }
+
+  const rows = dayAssignments.map(a => {
+    const actualVisits = dayVisits.filter(v => {
+      if (v.intern !== a.intern) return false;
+      const outlet = state.outlets.find(o => o.id === v.outlet_id);
+      return outlet && outlet.zone === a.zone;
+    });
+    const offZoneVisits = dayVisits.filter(v => {
+      if (v.intern !== a.intern) return false;
+      const outlet = state.outlets.find(o => o.id === v.outlet_id);
+      return outlet && outlet.zone && outlet.zone !== a.zone;
+    });
+    return { ...a, actualCount: actualVisits.length, offZoneCount: offZoneVisits.length };
+  });
+
+  container.innerHTML = `
+    <div class="card" style="padding:0;overflow-x:auto;">
+      <table>
+        <thead><tr><th>Intern</th><th>Assigned Zone</th><th>Shift</th><th>Visits Logged in Zone</th><th>Status</th></tr></thead>
+        <tbody>
+          ${rows.map(r => `
+            <tr>
+              <td><strong>${escapeHTML(r.intern)}</strong></td>
+              <td class="text-muted">${escapeHTML(r.zone)}</td>
+              <td class="text-muted">${escapeHTML(r.shift)}</td>
+              <td>${r.actualCount}</td>
+              <td>
+                ${r.actualCount === 0
+                  ? '<span class="pill pill-error">No visits — coverage gap</span>'
+                  : '<span class="pill pill-success">Covered</span>'}
+                ${r.offZoneCount > 0 ? `<span class="pill pill-warning" style="margin-left:var(--space-2);">${r.offZoneCount} off-zone visit${r.offZoneCount > 1 ? 's' : ''}</span>` : ''}
+              </td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
+/* ============================================================
+   VIEW: SETTINGS
+   ============================================================ */
+
+function renderSettings() {
+  const el = document.getElementById('view-settings');
+  el.innerHTML = `
+    <div class="view-header"><div><h2>Settings</h2><p>Manage interns and zones. Data lives only in this browser's localStorage.</p></div></div>
+
+    <div class="grid-2 gap-6">
+      <div class="card">
+        <strong>Interns</strong>
+        <div class="stack gap-2" id="internList" style="margin-top:var(--space-4);"></div>
+        <div class="cluster gap-2" style="margin-top:var(--space-4);">
+          <input type="text" id="newInternInput" placeholder="Intern name" style="flex:1;background:var(--color-bg-muted);border:1px solid var(--color-border);border-radius:var(--radius-sm);padding:var(--space-2) var(--space-3);font-size:var(--text-sm);color:var(--color-text-primary);">
+          <button class="btn-ghost btn-sm" id="addInternBtn">Add</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <strong>Zones (with region)</strong>
+        <div class="stack gap-2" id="zoneList" style="margin-top:var(--space-4);"></div>
+        <div class="cluster gap-2" style="margin-top:var(--space-4);flex-wrap:wrap;">
+          <input type="text" id="newZoneInput" placeholder="Zone name" style="flex:1;min-width:100px;background:var(--color-bg-muted);border:1px solid var(--color-border);border-radius:var(--radius-sm);padding:var(--space-2) var(--space-3);font-size:var(--text-sm);color:var(--color-text-primary);">
+          <input type="text" id="newRegionInput" placeholder="Region (island)" style="flex:1;min-width:100px;background:var(--color-bg-muted);border:1px solid var(--color-border);border-radius:var(--radius-sm);padding:var(--space-2) var(--space-3);font-size:var(--text-sm);color:var(--color-text-primary);">
+          <button class="btn-ghost btn-sm" id="addZoneBtn">Add</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:var(--space-8);">
+      <strong>Data</strong>
+      <p class="text-sm text-muted" style="margin-top:var(--space-2);margin-bottom:var(--space-4);">Everything is stored in this browser only. Export a backup or clear all data.</p>
+      <div class="cluster gap-3">
+        <button class="btn-ghost btn-sm" id="exportBtn">Export JSON Backup</button>
+        <button class="btn-ghost btn-sm" id="clearAllBtn" style="color:var(--color-error);">Clear All Data</button>
+      </div>
+    </div>
+  `;
+
+  document.getElementById('internList').innerHTML = state.interns.map(i => `
+    <div class="cluster gap-2" style="justify-content:space-between;">
+      <span class="text-sm">${escapeHTML(i)}</span>
+      <button class="btn-ghost btn-sm remove-intern-btn" data-name="${escapeHTML(i)}">Remove</button>
+    </div>`).join('');
+  document.getElementById('zoneList').innerHTML = state.zones.map(z => `
+    <div class="cluster gap-2" style="justify-content:space-between;">
+      <span class="text-sm">${escapeHTML(z.name)} <span class="text-tertiary">(${escapeHTML(z.region)})</span>${!z.polygon ? ' <span class="pill pill-neutral">no boundary</span>' : ' <span class="pill pill-success">drawn</span>'}</span>
+      <button class="btn-ghost btn-sm remove-zone-btn" data-name="${escapeHTML(z.name)}">Remove</button>
+    </div>`).join('');
+
+  document.getElementById('addInternBtn').addEventListener('click', () => {
+    const val = document.getElementById('newInternInput').value.trim();
+    if (!val) return;
+    if (!state.interns.includes(val)) state.interns.push(val);
+    persist(); renderSettings();
+  });
+  document.getElementById('addZoneBtn').addEventListener('click', () => {
+    const name = document.getElementById('newZoneInput').value.trim();
+    const region = document.getElementById('newRegionInput').value.trim();
+    if (!name || !region) { toast('Zone and region both required'); return; }
+    state.zones.push({ name, region });
+    persist(); renderSettings();
+  });
+  document.querySelectorAll('.remove-intern-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      state.interns = state.interns.filter(i => i !== btn.dataset.name);
+      persist(); renderSettings();
+    });
+  });
+  document.querySelectorAll('.remove-zone-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      state.zones = state.zones.filter(z => z.name !== btn.dataset.name);
+      persist(); renderSettings();
+    });
+  });
+  document.getElementById('exportBtn').addEventListener('click', () => {
+    const blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = `visit-intel-backup-${new Date().toISOString().slice(0,10)}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  });
+  document.getElementById('clearAllBtn').addEventListener('click', () => {
+    if (!confirm('This will permanently delete all outlets, visits, assignments, and drafts. Continue?')) return;
+    state = { outlets: [], visits: [], assignments: [], interns: state.interns, zones: state.zones, drafts: [] };
+    persist();
+    toast('All data cleared');
+    renderAll();
+  });
+}
+
+/* ============================================================
+   NAV / APP WIRING
+   ============================================================ */
+
+function updateNavCounts() {
+  // could add badges later; kept simple for now
+}
+
+/* Keeps the software <datalist> in sync: baseline options plus anything
+   already typed/parsed across outlets and visits, so free-text entries
+   like "POSbytz" become quick-pick suggestions everywhere after first use. */
+function refreshSoftwareSuggestions() {
+  const dl = document.getElementById('softwareSuggestions');
+  if (!dl) return;
+  const seen = new Set(SOFTWARE_OPTIONS);
+  state.outlets.forEach(o => { if (o.current_software) seen.add(o.current_software); });
+  state.visits.forEach(v => { if (v.software_reported) seen.add(v.software_reported); });
+  dl.innerHTML = [...seen].map(s => `<option value="${escapeHTML(s)}">`).join('');
+}
+
+function renderAll() {
+  renderIngest();
+  renderReview();
+  renderOutlets();
+  renderInterns();
+  renderSoftware();
+  renderRoster();
+  renderSettings();
+  updateNavCounts();
+  refreshSoftwareSuggestions();
+}
+
+document.getElementById('nav').addEventListener('click', e => {
+  const btn = e.target.closest('.nav-item');
+  if (!btn) return;
+  document.querySelectorAll('.nav-item').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+  const view = btn.dataset.view;
+  document.getElementById('view-' + view).classList.add('active');
+
+  if (view === 'ingest') renderIngest();
+  if (view === 'review') renderReview();
+  if (view === 'map') renderMap();
+  if (view === 'outlets') renderOutlets();
+  if (view === 'interns') renderInterns();
+  if (view === 'software') renderSoftware();
+  if (view === 'roster') renderRoster();
+  if (view === 'settings') renderSettings();
+});
+
+document.getElementById('modalOverlay').addEventListener('click', e => {
+  if (e.target.id === 'modalOverlay') closeModal();
+});
+
+document.getElementById('themeToggleBtn').addEventListener('click', toggleTheme);
+applyTheme(getTheme());
+
+renderAll();
+</script>
+</body>
+</html>
