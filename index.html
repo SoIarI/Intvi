@@ -349,6 +349,14 @@ const STORAGE_KEYS = {
   dayLogHistory: 'vi_daylog_history'
 };
 
+// Friendly names for the JSON-import preview table — keys match STORAGE_KEYS.
+const STORAGE_LABELS = {
+  outlets: 'Outlets', visits: 'Visits', assignments: 'Roster Assignments', people: 'People',
+  departments: 'Departments', zones: 'Zones', drafts: 'Review Drafts', attendance: 'Attendance',
+  dayReportDrafts: 'Day Report Drafts', dayReports: 'Day Reports', leaveTypes: 'Leave Types',
+  leaveRequests: 'Leave Requests', tasks: 'Tasks', dayLogAutosaves: 'Day Logger Drafts', dayLogHistory: 'Day Logger History'
+};
+
 const DEFAULT_ZONES = [
   { name: 'Malé City', region: 'Malé' },
   { name: 'Hulhumalé Phase 1', region: 'Hulhumalé' },
@@ -582,10 +590,17 @@ function applyApprovedLeaveToAttendance(leaveRequest) {
    ============================================================ */
 
 const FIELD_SYNONYMS = {
-  business_name: ['outlet name', 'location', 'business name', 'outlet', 'name'],
+  // "outlet name"/"location"/"business name"/"outlet" are unambiguous; a bare
+  // "name" is NOT included here — some formats (e.g. the contact-interview
+  // style with Outlet Name + Name + Designation + Company) use plain "Name:"
+  // for the person spoken to, not the outlet, so that label belongs to
+  // contact_name below instead.
+  business_name: ['outlet name', 'location', 'business name', 'outlet'],
   business_type: ['business type', 'type'],
   phone: ['phone number', 'number', 'contacts', 'contact', 'phone'],
   contact_owner: ['contact owner', 'owner'],
+  contact_name: ['name', 'contact name', 'contact person'],
+  company: ['company', 'company name'],
   software: ['currently using', 'software', 'current software', 'currently using pos'],
   notes: ['notes', 'note'],
   maps_link: ['location link', 'map link', 'maps link', 'link', 'map'],
@@ -745,6 +760,10 @@ function parseMessageText(rawText) {
       business_name: (f.business_name || '').trim(),
       business_type: (f.business_type || '').trim(),
       phone: (f.phone || '').trim(),
+      contact_name: (f.contact_name || '').trim(),
+      designation: (f.designation || '').trim(),
+      company: (f.company || '').trim(),
+      num_outlets: (f.num_outlets || '').trim(),
       software_reported: (f.software || '').trim(),
       notes: (f.notes || '').trim(),
       maps_link: mapsLink.trim(),
@@ -825,6 +844,10 @@ function commitDraftAsVisit(draft) {
     software_reported: draft.software_reported,
     notes: draft.notes,
     phone: draft.phone,
+    contact_name: draft.contact_name,
+    designation: draft.designation,
+    company: draft.company,
+    num_outlets: draft.num_outlets,
     maps_link: draft.maps_link,
     raw_text: draft.raw_text,
     crm_status_at_time: draft.crm_status
@@ -924,6 +947,10 @@ function renderReview() {
         <div class="field"><label>Business Name</label><input type="text" data-f="business_name" value="${escapeHTML(draft.business_name)}"></div>
         <div class="field"><label>Business Type</label><input type="text" data-f="business_type" value="${escapeHTML(draft.business_type)}"></div>
         <div class="field"><label>Phone / Contacts</label><input type="text" data-f="phone" value="${escapeHTML(draft.phone)}"></div>
+        <div class="field"><label>Contact Name</label><input type="text" data-f="contact_name" value="${escapeHTML(draft.contact_name)}"></div>
+        <div class="field"><label>Designation</label><input type="text" data-f="designation" value="${escapeHTML(draft.designation)}"></div>
+        <div class="field"><label>Company</label><input type="text" data-f="company" value="${escapeHTML(draft.company)}"></div>
+        <div class="field"><label># of Outlets</label><input type="text" data-f="num_outlets" value="${escapeHTML(draft.num_outlets)}"></div>
         <div class="field"><label>Software Reported</label>
           <input type="text" data-f="software_reported" value="${escapeHTML(draft.software_reported)}" list="softwareSuggestions" placeholder="e.g. Ewity, POSbytz, manual">
         </div>
@@ -1692,6 +1719,8 @@ function openOutletDetail(outletId) {
             ${crmPill(v.crm_status_at_time)}
           </div>
           ${v.software_reported ? `<p class="text-sm text-muted" style="margin-top:var(--space-1);">Software: ${escapeHTML(v.software_reported)}</p>` : ''}
+          ${(v.contact_name || v.designation || v.company) ? `<p class="text-sm text-muted" style="margin-top:var(--space-1);">Spoke with: ${[v.contact_name, v.designation, v.company].filter(Boolean).map(escapeHTML).join(' · ')}</p>` : ''}
+          ${v.num_outlets ? `<p class="text-sm text-muted" style="margin-top:var(--space-1);"># of Outlets: ${escapeHTML(v.num_outlets)}</p>` : ''}
           ${v.notes ? `<p class="text-sm" style="margin-top:var(--space-1);">${escapeHTML(v.notes)}</p>` : ''}
         </div>
       `).join('')}
@@ -2998,9 +3027,11 @@ function renderSettings() {
 
     <div class="card" style="margin-top:var(--space-8);">
       <strong>Data</strong>
-      <p class="text-sm text-muted" style="margin-top:var(--space-2);margin-bottom:var(--space-4);">Everything is stored in this browser only. Export a backup or clear all data.</p>
+      <p class="text-sm text-muted" style="margin-top:var(--space-2);margin-bottom:var(--space-4);">Everything is stored in this browser only. Export a backup, import one from another copy of this file, or clear all data.</p>
       <div class="cluster gap-3">
         <button class="btn-ghost btn-sm" id="exportBtn">Export JSON Backup</button>
+        <button class="btn-ghost btn-sm" id="importBtn">Import JSON Backup</button>
+        <input type="file" id="importFileInput" accept=".json,application/json" style="display:none;">
         <button class="btn-ghost btn-sm" id="clearAllBtn" style="color:var(--color-error);">Clear All Data</button>
       </div>
     </div>
@@ -3067,6 +3098,14 @@ function renderSettings() {
     a.click();
     URL.revokeObjectURL(url);
   });
+  document.getElementById('importBtn').addEventListener('click', () => {
+    document.getElementById('importFileInput').click();
+  });
+  document.getElementById('importFileInput').addEventListener('change', e => {
+    const file = e.target.files[0];
+    e.target.value = '';
+    if (file) handleImportFile(file);
+  });
   document.getElementById('clearAllBtn').addEventListener('click', () => {
     if (!confirm('This will permanently delete all outlets, visits, assignments, attendance, day reports, and leave requests. Continue?')) return;
     state = {
@@ -3082,6 +3121,83 @@ function renderSettings() {
     toast('All data cleared');
     renderAll();
   });
+}
+
+/* ── JSON backup import ── reads a file exported by this same app's own
+   "Export JSON Backup" button (any version — older exports simply lack
+   newer STORAGE_KEYS, which just import zero records for those keys).
+   Always merges rather than replaces: records are matched against what's
+   already here by id (or by name/string value for id-less records like
+   zones/departments/leave types) and only genuinely new ones are added,
+   so importing an old backup can't clobber newer data entered since. */
+
+function importRecordKey(item) {
+  if (typeof item === 'string') return item;
+  if (item && typeof item === 'object') return item.id || item.name || JSON.stringify(item);
+  return JSON.stringify(item);
+}
+
+function diffImportRecords(parsed) {
+  return Object.keys(STORAGE_KEYS).map(key => {
+    const incoming = Array.isArray(parsed[key]) ? parsed[key] : [];
+    const current = Array.isArray(state[key]) ? state[key] : [];
+    const seen = new Set(current.map(importRecordKey));
+    const newItems = incoming.filter(item => !seen.has(importRecordKey(item)));
+    return { key, incoming, newItems };
+  }).filter(d => d.incoming.length > 0);
+}
+
+function handleImportFile(file) {
+  const reader = new FileReader();
+  reader.onload = () => {
+    let parsed;
+    try { parsed = JSON.parse(reader.result); } catch { toast('That file is not valid JSON'); return; }
+    if (!parsed || typeof parsed !== 'object') { toast('That file is not valid JSON'); return; }
+    openImportPreviewModal(parsed);
+  };
+  reader.onerror = () => toast('Could not read that file');
+  reader.readAsText(file);
+}
+
+function openImportPreviewModal(parsed) {
+  const diffs = diffImportRecords(parsed);
+  if (diffs.length === 0) { toast('No recognizable data found in that file'); return; }
+
+  const totalNew = diffs.reduce((n, d) => n + d.newItems.length, 0);
+  const modal = document.getElementById('modalContent');
+  modal.innerHTML = `
+    <h3>Import JSON Backup</h3>
+    <p class="text-tertiary text-sm" style="margin-bottom:var(--space-4);">Merges records from the file into what's already here — anything matching an existing outlet/visit/person/etc. by id or name is skipped, so nothing gets duplicated or overwritten.</p>
+    <div style="max-height:40vh;overflow-y:auto;">
+      <table>
+        <thead><tr><th>Data</th><th>In file</th><th>New</th></tr></thead>
+        <tbody>
+          ${diffs.map(d => `<tr><td>${escapeHTML(STORAGE_LABELS[d.key] || d.key)}</td><td class="text-muted">${d.incoming.length}</td><td>${d.newItems.length ? `<strong>${d.newItems.length}</strong>` : '<span class="text-tertiary">0</span>'}</td></tr>`).join('')}
+        </tbody>
+      </table>
+    </div>
+    <div class="cluster gap-3" style="margin-top:var(--space-6);justify-content:flex-end;">
+      <button class="btn-ghost btn-sm" id="closeModalBtn">Cancel</button>
+      <button class="btn-primary btn-sm" id="confirmImportBtn" ${totalNew === 0 ? 'disabled' : ''}>Import ${totalNew} New ${totalNew === 1 ? 'Record' : 'Records'}</button>
+    </div>
+  `;
+  document.getElementById('modalOverlay').classList.add('active');
+  document.getElementById('closeModalBtn').addEventListener('click', closeModal);
+  if (totalNew > 0) {
+    document.getElementById('confirmImportBtn').addEventListener('click', () => commitImport(diffs));
+  }
+}
+
+function commitImport(diffs) {
+  let totalAdded = 0;
+  diffs.forEach(({ key, newItems }) => {
+    state[key] = (Array.isArray(state[key]) ? state[key] : []).concat(newItems);
+    totalAdded += newItems.length;
+  });
+  persist();
+  closeModal();
+  toast(`Imported ${totalAdded} new ${totalAdded === 1 ? 'record' : 'records'}`);
+  renderAll();
 }
 
 /* ============================================================
