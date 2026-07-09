@@ -250,6 +250,7 @@ tr:hover td{background:var(--color-bg-muted);}
       <button class="nav-item" data-view="interns"><span class="dot"></span>Intern Summary</button>
       <button class="nav-item" data-view="software"><span class="dot"></span>Software Dominance</button>
       <button class="nav-item" data-view="roster"><span class="dot"></span>Shift Roster</button>
+      <button class="nav-item" data-view="hr"><span class="dot"></span>HR</button>
       <button class="nav-item" data-view="settings"><span class="dot"></span>Settings</button>
     </nav>
     <div style="margin-top:auto;">
@@ -266,6 +267,7 @@ tr:hover td{background:var(--color-bg-muted);}
     <section class="view" id="view-interns"></section>
     <section class="view" id="view-software"></section>
     <section class="view" id="view-roster"></section>
+    <section class="view" id="view-hr"></section>
     <section class="view" id="view-settings"></section>
   </main>
 </div>
@@ -288,9 +290,15 @@ const STORAGE_KEYS = {
   outlets: 'vi_outlets',
   visits: 'vi_visits',
   assignments: 'vi_assignments',
-  interns: 'vi_interns',
+  people: 'vi_people',
+  departments: 'vi_departments',
   zones: 'vi_zones',
-  drafts: 'vi_drafts' // parsed-but-not-reviewed queue
+  drafts: 'vi_drafts', // parsed-but-not-reviewed queue (visits)
+  attendance: 'vi_attendance',
+  dayReportDrafts: 'vi_day_report_drafts',
+  dayReports: 'vi_day_reports',
+  leaveTypes: 'vi_leave_types',
+  leaveRequests: 'vi_leave_requests'
 };
 
 const DEFAULT_ZONES = [
@@ -302,6 +310,33 @@ const DEFAULT_ZONES = [
 ];
 
 const SOFTWARE_OPTIONS = ['Ewity', 'No POS / Manual', 'Foodics', 'Other POS', 'Unknown'];
+
+const DEFAULT_DEPARTMENTS = ['Sales', 'Support', 'Field Interns', 'Operations'];
+const DEFAULT_LEAVE_TYPES = ['Annual', 'Sick', 'Emergency', 'Unpaid'];
+const EMPLOYMENT_TYPES = ['Full-time', 'Part-time', 'Intern', 'Contract'];
+const PERSON_STATUSES = ['Onboarding', 'Active', 'Inactive'];
+const ATTENDANCE_STATUSES = ['Present', 'Absent', 'Late', 'Half Day', 'On Leave'];
+
+/* One-time migration: earlier versions of this app stored a flat list of
+   intern names under 'vi_interns'. The HR module needs richer per-person
+   records, so on first load (if 'vi_people' doesn't exist yet) convert
+   that old list into people records instead of discarding it. The old
+   key is left in place afterward — it's a harmless orphan. */
+function migratePeopleFromLegacyInterns() {
+  const legacyNames = loadJSON('vi_interns', ['Aisha', 'Hassan', 'Ibrahim']);
+  return legacyNames.map(name => ({
+    id: uid(),
+    name,
+    role: '',
+    department: '',
+    phone: '',
+    email: '',
+    start_date: '',
+    employment_type: 'Intern',
+    status: 'Active',
+    leave_allowance: 14
+  }));
+}
 
 function loadJSON(key, fallback) {
   try {
@@ -359,18 +394,30 @@ let state = {
   outlets: loadJSON(STORAGE_KEYS.outlets, []),
   visits: loadJSON(STORAGE_KEYS.visits, []),
   assignments: loadJSON(STORAGE_KEYS.assignments, []),
-  interns: loadJSON(STORAGE_KEYS.interns, ['Aisha', 'Hassan', 'Ibrahim']),
+  people: loadJSON(STORAGE_KEYS.people, migratePeopleFromLegacyInterns()),
+  departments: loadJSON(STORAGE_KEYS.departments, DEFAULT_DEPARTMENTS.slice()),
   zones: loadJSON(STORAGE_KEYS.zones, DEFAULT_ZONES),
-  drafts: loadJSON(STORAGE_KEYS.drafts, [])
+  drafts: loadJSON(STORAGE_KEYS.drafts, []),
+  attendance: loadJSON(STORAGE_KEYS.attendance, []),
+  dayReportDrafts: loadJSON(STORAGE_KEYS.dayReportDrafts, []),
+  dayReports: loadJSON(STORAGE_KEYS.dayReports, []),
+  leaveTypes: loadJSON(STORAGE_KEYS.leaveTypes, DEFAULT_LEAVE_TYPES.slice()),
+  leaveRequests: loadJSON(STORAGE_KEYS.leaveRequests, [])
 };
 
 function persist() {
   saveJSON(STORAGE_KEYS.outlets, state.outlets);
   saveJSON(STORAGE_KEYS.visits, state.visits);
   saveJSON(STORAGE_KEYS.assignments, state.assignments);
-  saveJSON(STORAGE_KEYS.interns, state.interns);
+  saveJSON(STORAGE_KEYS.people, state.people);
+  saveJSON(STORAGE_KEYS.departments, state.departments);
   saveJSON(STORAGE_KEYS.zones, state.zones);
   saveJSON(STORAGE_KEYS.drafts, state.drafts);
+  saveJSON(STORAGE_KEYS.attendance, state.attendance);
+  saveJSON(STORAGE_KEYS.dayReportDrafts, state.dayReportDrafts);
+  saveJSON(STORAGE_KEYS.dayReports, state.dayReports);
+  saveJSON(STORAGE_KEYS.leaveTypes, state.leaveTypes);
+  saveJSON(STORAGE_KEYS.leaveRequests, state.leaveRequests);
 }
 
 function toast(msg) {
@@ -384,6 +431,67 @@ function toast(msg) {
 function zoneRegion(zoneName) {
   const z = state.zones.find(z => z.name === zoneName);
   return z ? z.region : '';
+}
+
+/* ── People / HR helpers ──
+   People are joined everywhere (visits, assignments, attendance, leave)
+   by their name string, same as the old flat intern list was — no
+   id-based refactor of those records, since there's no auth/ids on the
+   frontend yet. ── */
+function personNames() {
+  return state.people.map(p => p.name);
+}
+function findPerson(name) {
+  return state.people.find(p => p.name === name) || null;
+}
+
+function todayISO() {
+  return nowISO().slice(0, 10);
+}
+
+function getOrCreateAttendance(personName, date) {
+  let rec = state.attendance.find(a => a.person === personName && a.date === date);
+  if (!rec) {
+    rec = { id: uid(), person: personName, date, status: '', clock_in: '', clock_out: '' };
+    state.attendance.push(rec);
+  }
+  return rec;
+}
+
+function isUnexplainedAbsence(personName, date) {
+  const rec = state.attendance.find(a => a.person === personName && a.date === date);
+  if (!rec || rec.status !== 'Absent') return false;
+  const onApprovedLeave = state.leaveRequests.some(l =>
+    l.person === personName && l.status === 'approved' && date >= l.start_date && date <= l.end_date
+  );
+  return !onApprovedLeave;
+}
+
+function leaveDaysApprovedThisYear(personName) {
+  const year = new Date().getFullYear();
+  let days = 0;
+  state.leaveRequests
+    .filter(l => l.person === personName && l.status === 'approved')
+    .forEach(l => {
+      const start = new Date(l.start_date + 'T00:00:00');
+      const end = new Date(l.end_date + 'T00:00:00');
+      for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+        if (d.getFullYear() === year) days++;
+      }
+    });
+  return days;
+}
+
+/* Applies "On Leave" attendance status across an approved leave request's
+   date range, so the Attendance tab stays accurate without manual entry. */
+function applyApprovedLeaveToAttendance(leaveRequest) {
+  const start = new Date(leaveRequest.start_date + 'T00:00:00');
+  const end = new Date(leaveRequest.end_date + 'T00:00:00');
+  for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+    const dateStr = d.toISOString().slice(0, 10);
+    const rec = getOrCreateAttendance(leaveRequest.person, dateStr);
+    rec.status = 'On Leave';
+  }
 }
 
 /* ============================================================
@@ -549,7 +657,7 @@ function parseMessageText(rawText) {
     let intern = '';
     let internReportedRaw = (f.intern_reported || '').trim();
     if (internReportedRaw) {
-      const matchedIntern = state.interns.find(i => normalizeName(i) === normalizeName(internReportedRaw));
+      const matchedIntern = personNames().find(i => normalizeName(i) === normalizeName(internReportedRaw));
       if (matchedIntern) intern = matchedIntern;
     }
 
@@ -743,7 +851,7 @@ function renderReview() {
         <div class="field"><label>Intern</label>
           <select data-f="intern">
             <option value="">— select —</option>
-            ${state.interns.map(i => `<option value="${i}" ${draft.intern === i ? 'selected' : ''}>${i}</option>`).join('')}
+            ${personNames().map(i => `<option value="${i}" ${draft.intern === i ? 'selected' : ''}>${i}</option>`).join('')}
           </select>
           ${(!draft.intern && draft.intern_reported_raw) ? `<span class="text-xs" style="color:var(--color-warning);">Message reported "${escapeHTML(draft.intern_reported_raw)}" — not in your intern list, add them in Settings or pick manually</span>` : ''}
         </div>
@@ -1537,7 +1645,7 @@ function closeModal() {
 
 function renderInterns() {
   const el = document.getElementById('view-interns');
-  const rows = state.interns.map(name => {
+  const rows = personNames().map(name => {
     const visits = state.visits.filter(v => v.intern === name);
     const outletIds = new Set(visits.map(v => v.outlet_id));
     const zones = new Set();
@@ -1755,7 +1863,7 @@ function renderRoster() {
    across the roster map and the legend. */
 const INTERN_COLOR_PALETTE = ['#8B0000', '#3A6EA5', '#3A9E5F', '#D97706', '#6B4E9E', '#B5451F', '#2E8B8B', '#A8508A'];
 function colorForIntern(name) {
-  const idx = state.interns.indexOf(name);
+  const idx = personNames().indexOf(name);
   if (idx === -1) return '#6B6B6B';
   return INTERN_COLOR_PALETTE[idx % INTERN_COLOR_PALETTE.length];
 }
@@ -1911,7 +2019,7 @@ function openAssignmentModal(shift) {
     </div>
     <div class="grid-2 gap-4">
       <div class="field"><label>Intern</label>
-        <select id="assignIntern">${state.interns.map(i => `<option value="${i}">${i}</option>`).join('')}</select>
+        <select id="assignIntern">${personNames().map(i => `<option value="${i}">${i}</option>`).join('')}</select>
       </div>
       <div class="field"><label>Zone</label>
         <select id="assignZone">${state.zones.map(z => `<option value="${z.name}">${z.name} (${z.region})</option>`).join('')}</select>
@@ -1985,24 +2093,697 @@ function renderAssignedVsActual() {
 }
 
 /* ============================================================
+   VIEW: HR
+   Internal sub-tab bar, same pattern as Shift Roster's shift toggle.
+   ============================================================ */
+
+const HR_TABS = [
+  { key: 'directory', label: 'Directory' },
+  { key: 'clock', label: 'Clock In/Out' },
+  { key: 'attendance', label: 'Attendance' },
+  { key: 'dayreports', label: 'Day Reports' },
+  { key: 'leave', label: 'Leave & Absences' },
+  { key: 'assignment', label: "Today's Assignment" }
+];
+let hrActiveTab = 'directory';
+
+function renderHR() {
+  const el = document.getElementById('view-hr');
+  el.innerHTML = `
+    <div class="view-header">
+      <div><h2>HR</h2><p>People, attendance, leave, and daily coverage for the team.</p></div>
+    </div>
+    <div class="cluster gap-2" style="margin-bottom:var(--space-6);flex-wrap:wrap;" id="hrTabToggle">
+      ${HR_TABS.map(t => `<button class="btn-ghost btn-sm hr-tab-btn" data-tab="${t.key}" style="${t.key === hrActiveTab ? 'background:var(--color-accent);color:var(--color-text-inverse);border-color:var(--color-accent);' : ''}">${t.label}</button>`).join('')}
+    </div>
+    <div id="hrTabContent"></div>
+  `;
+  document.querySelectorAll('.hr-tab-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      hrActiveTab = btn.dataset.tab;
+      renderHR();
+    });
+  });
+  renderHRTabContent();
+}
+
+function renderHRTabContent() {
+  if (hrActiveTab === 'directory') renderPeopleDirectory();
+  else if (hrActiveTab === 'clock') renderClockInOut();
+  else if (hrActiveTab === 'attendance') renderHRAttendance();
+  else if (hrActiveTab === 'dayreports') renderDayReports();
+  else if (hrActiveTab === 'leave') renderLeave();
+  else if (hrActiveTab === 'assignment') renderTodayAssignment();
+}
+
+/* ── Directory ── */
+
+function renderPeopleDirectory() {
+  const el = document.getElementById('hrTabContent');
+  const sorted = [...state.people].sort((a, b) => a.name.localeCompare(b.name));
+  el.innerHTML = `
+    <div class="cluster gap-3" style="justify-content:space-between;margin-bottom:var(--space-5);">
+      <p class="text-sm text-muted">${state.people.length} ${state.people.length === 1 ? 'person' : 'people'} on record.</p>
+      <button class="btn-primary btn-sm" id="addPersonBtn">+ Add Person</button>
+    </div>
+    <div class="card" style="padding:0;overflow-x:auto;">
+      ${sorted.length === 0 ? '<div class="empty-state"><p>No people yet. Add someone to get started.</p></div>' : `
+      <table>
+        <thead><tr>
+          <th>Name</th><th>Role</th><th>Department</th><th>Type</th><th>Status</th><th>Phone</th><th>Email</th><th>Leave Balance</th>
+        </tr></thead>
+        <tbody>
+          ${sorted.map(p => `
+            <tr class="person-row" data-name="${escapeHTML(p.name)}" style="cursor:pointer;">
+              <td><strong>${escapeHTML(p.name)}</strong></td>
+              <td class="text-muted">${escapeHTML(p.role || '—')}</td>
+              <td class="text-muted">${escapeHTML(p.department || '—')}</td>
+              <td class="text-muted">${escapeHTML(p.employment_type || '—')}</td>
+              <td>${personStatusPill(p.status)}</td>
+              <td class="text-muted">${escapeHTML(p.phone || '—')}</td>
+              <td class="text-muted">${escapeHTML(p.email || '—')}</td>
+              <td class="text-muted">${(p.leave_allowance || 0) - leaveDaysApprovedThisYear(p.name)} / ${p.leave_allowance || 0}</td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>`}
+    </div>
+  `;
+  document.getElementById('addPersonBtn').addEventListener('click', () => openPersonModal(null));
+  document.querySelectorAll('.person-row').forEach(row => {
+    row.addEventListener('click', () => openPersonModal(row.dataset.name));
+  });
+}
+
+function personStatusPill(status) {
+  if (status === 'Active') return '<span class="pill pill-success">Active</span>';
+  if (status === 'Onboarding') return '<span class="pill pill-warning">Onboarding</span>';
+  if (status === 'Inactive') return '<span class="pill pill-neutral">Inactive</span>';
+  return '<span class="pill pill-neutral">—</span>';
+}
+
+function openPersonModal(personName) {
+  const editing = personName ? findPerson(personName) : null;
+  const modal = document.getElementById('modalContent');
+  modal.innerHTML = `
+    <div class="cluster gap-3" style="justify-content:space-between;margin-bottom:var(--space-6);">
+      <h3>${editing ? escapeHTML(editing.name) : 'Add Person'}</h3>
+      <button class="btn-ghost btn-sm" id="closeModalBtn">Close</button>
+    </div>
+    <div class="grid-2 gap-4">
+      <div class="field"><label>Name *</label><input type="text" id="pName" value="${editing ? escapeHTML(editing.name) : ''}" placeholder="e.g. Aisha"></div>
+      <div class="field"><label>Role</label><input type="text" id="pRole" value="${editing ? escapeHTML(editing.role || '') : ''}" placeholder="e.g. Field Intern"></div>
+      <div class="field"><label>Department</label>
+        <select id="pDepartment">
+          <option value="">— select —</option>
+          ${state.departments.map(d => `<option value="${escapeHTML(d)}" ${editing && editing.department === d ? 'selected' : ''}>${escapeHTML(d)}</option>`).join('')}
+        </select>
+      </div>
+      <div class="field"><label>Employment Type</label>
+        <select id="pEmploymentType">
+          ${EMPLOYMENT_TYPES.map(t => `<option value="${t}" ${editing && editing.employment_type === t ? 'selected' : ''}>${t}</option>`).join('')}
+        </select>
+      </div>
+      <div class="field"><label>Status</label>
+        <select id="pStatus">
+          ${PERSON_STATUSES.map(s => `<option value="${s}" ${editing && editing.status === s ? 'selected' : (!editing && s === 'Active' ? 'selected' : '')}>${s}</option>`).join('')}
+        </select>
+      </div>
+      <div class="field"><label>Phone</label><input type="text" id="pPhone" value="${editing ? escapeHTML(editing.phone || '') : ''}"></div>
+      <div class="field"><label>Email</label><input type="text" id="pEmail" value="${editing ? escapeHTML(editing.email || '') : ''}"></div>
+      <div class="field"><label>Start Date</label><input type="date" id="pStartDate" value="${editing ? escapeHTML(editing.start_date || '') : ''}"></div>
+      <div class="field"><label>Leave Allowance (days/year)</label><input type="number" id="pLeaveAllowance" value="${editing ? (editing.leave_allowance ?? 14) : 14}"></div>
+    </div>
+    ${editing ? `<p class="text-xs text-tertiary" style="margin-top:var(--space-5);">This month's attendance: ${monthlyAttendancePct(editing.name)}% present/on-time.</p>` : ''}
+    <div class="cluster gap-3" style="margin-top:var(--space-6);justify-content:space-between;">
+      ${editing ? `<button class="btn-ghost btn-sm" id="removePersonBtn" style="color:var(--color-error);">Remove</button>` : '<span></span>'}
+      <button class="btn-primary btn-sm" id="savePersonBtn">${editing ? 'Save Changes' : 'Add Person'}</button>
+    </div>
+  `;
+  document.getElementById('modalOverlay').classList.add('active');
+  document.getElementById('closeModalBtn').addEventListener('click', closeModal);
+  document.getElementById('savePersonBtn').addEventListener('click', () => {
+    const name = document.getElementById('pName').value.trim();
+    if (!name) { toast('Name is required'); return; }
+    if (!editing && findPerson(name)) { toast('A person with this name already exists'); return; }
+    const fields = {
+      name,
+      role: document.getElementById('pRole').value.trim(),
+      department: document.getElementById('pDepartment').value,
+      employment_type: document.getElementById('pEmploymentType').value,
+      status: document.getElementById('pStatus').value,
+      phone: document.getElementById('pPhone').value.trim(),
+      email: document.getElementById('pEmail').value.trim(),
+      start_date: document.getElementById('pStartDate').value,
+      leave_allowance: parseInt(document.getElementById('pLeaveAllowance').value, 10) || 0
+    };
+    if (editing) {
+      Object.assign(editing, fields);
+      toast('Person updated');
+    } else {
+      state.people.push({ id: uid(), ...fields });
+      toast(`${name} added`);
+    }
+    persist();
+    closeModal();
+    renderPeopleDirectory();
+  });
+  if (editing) {
+    document.getElementById('removePersonBtn').addEventListener('click', () => {
+      state.people = state.people.filter(p => p.name !== editing.name);
+      persist();
+      toast(`${editing.name} removed`);
+      closeModal();
+      renderPeopleDirectory();
+    });
+  }
+}
+
+function monthlyAttendancePct(personName) {
+  const now = new Date();
+  const monthPrefix = now.toISOString().slice(0, 7);
+  const recs = state.attendance.filter(a => a.person === personName && a.date.startsWith(monthPrefix));
+  if (recs.length === 0) return 0;
+  const good = recs.filter(a => a.status === 'Present' || a.status === 'Late').length;
+  return Math.round((good / recs.length) * 100);
+}
+
+/* ── Clock In / Clock Out ── */
+
+function renderClockInOut() {
+  const el = document.getElementById('hrTabContent');
+  const date = todayISO();
+  const sorted = [...state.people].sort((a, b) => a.name.localeCompare(b.name));
+  el.innerHTML = `
+    <p class="text-sm text-muted" style="margin-bottom:var(--space-5);">Today — ${date}</p>
+    <div class="card" style="padding:0;overflow-x:auto;">
+      ${sorted.length === 0 ? '<div class="empty-state"><p>No people on record yet — add them in Directory.</p></div>' : `
+      <table>
+        <thead><tr><th>Name</th><th>Status</th><th>Clocked In</th><th>Clocked Out</th><th></th></tr></thead>
+        <tbody>
+          ${sorted.map(p => {
+            const rec = state.attendance.find(a => a.person === p.name && a.date === date);
+            const clockedIn = rec && rec.clock_in;
+            const clockedOut = rec && rec.clock_out;
+            return `
+              <tr>
+                <td><strong>${escapeHTML(p.name)}</strong></td>
+                <td>${rec && rec.status ? attendanceStatusPill(rec.status) : '<span class="pill pill-neutral">Not clocked in</span>'}</td>
+                <td class="text-muted">${clockedIn ? escapeHTML(clockedIn) : '—'}</td>
+                <td class="text-muted">${clockedOut ? escapeHTML(clockedOut) : '—'}</td>
+                <td>
+                  ${!clockedIn ? `<button class="btn-primary btn-sm clock-in-btn" data-name="${escapeHTML(p.name)}">Clock In</button>` :
+                    !clockedOut ? `<button class="btn-ghost btn-sm clock-out-btn" data-name="${escapeHTML(p.name)}">Clock Out</button>` :
+                    '<span class="text-xs text-tertiary">Done for today</span>'}
+                </td>
+              </tr>
+            `;
+          }).join('')}
+        </tbody>
+      </table>`}
+    </div>
+  `;
+  document.querySelectorAll('.clock-in-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const rec = getOrCreateAttendance(btn.dataset.name, date);
+      const now = new Date();
+      rec.clock_in = now.toTimeString().slice(0, 5);
+      const cutoffMinutes = 9 * 60 + 30; // 9:30am
+      const nowMinutes = now.getHours() * 60 + now.getMinutes();
+      if (!rec.status) rec.status = nowMinutes > cutoffMinutes ? 'Late' : 'Present';
+      persist();
+      toast(`${btn.dataset.name} clocked in`);
+      renderClockInOut();
+    });
+  });
+  document.querySelectorAll('.clock-out-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const rec = getOrCreateAttendance(btn.dataset.name, date);
+      rec.clock_out = new Date().toTimeString().slice(0, 5);
+      persist();
+      toast(`${btn.dataset.name} clocked out`);
+      renderClockInOut();
+    });
+  });
+}
+
+function attendanceStatusPill(status) {
+  if (status === 'Present') return '<span class="pill pill-success">Present</span>';
+  if (status === 'Late') return '<span class="pill pill-warning">Late</span>';
+  if (status === 'Half Day') return '<span class="pill pill-warning">Half Day</span>';
+  if (status === 'On Leave') return '<span class="pill pill-neutral">On Leave</span>';
+  if (status === 'Absent') return '<span class="pill pill-error">Absent</span>';
+  return '<span class="pill pill-neutral">—</span>';
+}
+
+/* ── Attendance ── */
+
+let attendanceViewDate = todayISO();
+
+function renderHRAttendance() {
+  const el = document.getElementById('hrTabContent');
+  const sortedPeople = [...state.people].sort((a, b) => a.name.localeCompare(b.name));
+
+  el.innerHTML = `
+    <div class="cluster gap-3" style="margin-bottom:var(--space-6);">
+      <div class="field" style="min-width:180px;"><label>Date</label><input type="date" id="attendanceDateInput" value="${attendanceViewDate}"></div>
+    </div>
+    <div class="card" style="padding:0;overflow-x:auto;margin-bottom:var(--space-8);">
+      ${sortedPeople.length === 0 ? '<div class="empty-state"><p>No people on record yet.</p></div>' : `
+      <table>
+        <thead><tr><th>Name</th><th>Status</th><th></th></tr></thead>
+        <tbody>
+          ${sortedPeople.map(p => {
+            const rec = getOrCreateAttendance(p.name, attendanceViewDate);
+            const unexplained = isUnexplainedAbsence(p.name, attendanceViewDate);
+            return `
+              <tr>
+                <td><strong>${escapeHTML(p.name)}</strong></td>
+                <td>
+                  <select data-name="${escapeHTML(p.name)}" class="attendance-status-select">
+                    <option value="">— unset —</option>
+                    ${ATTENDANCE_STATUSES.map(s => `<option value="${s}" ${rec.status === s ? 'selected' : ''}>${s}</option>`).join('')}
+                  </select>
+                </td>
+                <td>${unexplained ? '<span class="pill pill-error">Unexplained absence</span>' : ''}</td>
+              </tr>
+            `;
+          }).join('')}
+        </tbody>
+      </table>`}
+    </div>
+
+    <h3 style="font-size:var(--text-xl);margin-bottom:var(--space-4);">This Month</h3>
+    <div class="card" style="padding:0;overflow-x:auto;">
+      ${sortedPeople.length === 0 ? '<div class="empty-state"><p>No data yet.</p></div>' : `
+      <table>
+        <thead><tr><th>Name</th><th>Attendance %</th></tr></thead>
+        <tbody>
+          ${sortedPeople.map(p => {
+            const pct = monthlyAttendancePct(p.name);
+            return `
+              <tr>
+                <td><strong>${escapeHTML(p.name)}</strong></td>
+                <td>
+                  <div class="cluster gap-2">
+                    <div class="bar-track" style="width:120px;">
+                      <div class="bar-segment" style="width:${pct}%;background:${pct >= 70 ? 'var(--color-success)' : pct >= 40 ? 'var(--color-warning)' : 'var(--color-error)'};"></div>
+                    </div>
+                    <span class="text-xs text-muted">${pct}%</span>
+                  </div>
+                </td>
+              </tr>
+            `;
+          }).join('')}
+        </tbody>
+      </table>`}
+    </div>
+  `;
+
+  document.getElementById('attendanceDateInput').addEventListener('change', e => {
+    attendanceViewDate = e.target.value;
+    persist();
+    renderHRAttendance();
+  });
+  document.querySelectorAll('.attendance-status-select').forEach(sel => {
+    sel.addEventListener('change', () => {
+      const rec = getOrCreateAttendance(sel.dataset.name, attendanceViewDate);
+      rec.status = sel.value;
+      persist();
+      renderHRAttendance();
+    });
+  });
+}
+
+/* ── Day Reports ──
+   Same paste-and-parse pipeline as Import Visits/Review Queue, but for
+   end-of-day Telegram reports instead of outlet visits. */
+
+const DAY_REPORT_FIELD_SYNONYMS = {
+  reporter: ['agent', 'name', 'reported by', 'intern'],
+  status: ['status', 'attendance'],
+  tasks_done: ['tasks done', 'tasks completed', 'today', 'summary', 'work done'],
+  issues: ['issues', 'problems', 'blockers'],
+  tomorrow_plan: ['tomorrow', "tomorrow's plan", 'plan', 'next'],
+  hours_worked: ['hours', 'hours worked', 'time worked']
+};
+
+const DAY_REPORT_LABEL_LOOKUP = (() => {
+  const pairs = [];
+  for (const [field, labels] of Object.entries(DAY_REPORT_FIELD_SYNONYMS)) {
+    for (const label of labels) pairs.push([label, field]);
+  }
+  pairs.sort((a, b) => b[0].length - a[0].length);
+  return pairs;
+})();
+
+function findDayReportLabelInLine(line) {
+  const cleaned = line.replace(/^[\s•\-\*📍✅➡️▪️]+/, '').trim();
+  const m = cleaned.match(/^([A-Za-z][A-Za-z \/']{1,30}?)\s*[:\-]\s*(.*)$/);
+  if (!m) return null;
+  const rawLabel = m[1].trim().toLowerCase();
+  const rest = m[2].trim();
+  for (const [label, field] of DAY_REPORT_LABEL_LOOKUP) {
+    if (rawLabel === label) return { field, value: rest };
+  }
+  return null;
+}
+
+const DAY_REPORT_STATUS_MAP = {
+  present: 'Present', late: 'Late', absent: 'Absent',
+  'half day': 'Half Day', 'on leave': 'On Leave', leave: 'On Leave'
+};
+
+/* Day reports are normally one-per-pasted-message, but interns
+   sometimes stack a few — split blocks the same way visit messages do,
+   using a fresh "reporter" line as the block boundary. */
+function parseDayReport(rawText) {
+  const lines = rawText.split('\n').map(l => l.trimEnd());
+  const blocks = [];
+  let current = null;
+
+  function pushCurrent() {
+    if (current && (current.fields.reporter || current.fields.tasks_done)) blocks.push(current);
+    current = null;
+  }
+
+  for (let rawLine of lines) {
+    const line = rawLine.trim();
+    if (!line) continue;
+    const found = findDayReportLabelInLine(line);
+    if (found) {
+      if (found.field === 'reporter') {
+        pushCurrent();
+        current = { fields: {} };
+        current.fields.reporter = found.value;
+      } else {
+        if (!current) current = { fields: {} };
+        current.fields[found.field] = found.value;
+      }
+    } else if (current) {
+      if (current.fields.tasks_done !== undefined) {
+        current.fields.tasks_done += ' ' + line;
+      } else {
+        current.fields.tasks_done = line;
+      }
+    }
+  }
+  pushCurrent();
+
+  return blocks.map(b => {
+    const f = b.fields;
+    const matchedPerson = personNames().find(n => normalizeName(n) === normalizeName(f.reporter || ''));
+    const rawStatus = (f.status || '').trim().toLowerCase();
+    return {
+      id: uid(),
+      person: matchedPerson || '',
+      reporter_raw: (f.reporter || '').trim(),
+      status: DAY_REPORT_STATUS_MAP[rawStatus] || 'Present',
+      tasks_done: (f.tasks_done || '').trim(),
+      issues: (f.issues || '').trim(),
+      tomorrow_plan: (f.tomorrow_plan || '').trim(),
+      hours_worked: (f.hours_worked || '').trim(),
+      date: todayISO(),
+      raw_text: rawText.trim()
+    };
+  });
+}
+
+function renderDayReports() {
+  const el = document.getElementById('hrTabContent');
+  el.innerHTML = `
+    <div class="card" style="margin-bottom:var(--space-8);">
+      <div class="field">
+        <label>Raw pasted day report</label>
+        <textarea id="dayReportPasteArea" rows="10" placeholder="Paste end-of-day Telegram reports here..."></textarea>
+      </div>
+      <div class="cluster gap-3" style="margin-top:var(--space-5);">
+        <button class="btn-primary" id="parseDayReportBtn">Parse Reports</button>
+        <button class="btn-ghost" id="clearDayReportPasteBtn">Clear</button>
+        <span class="text-sm text-tertiary" id="dayReportParseMsg"></span>
+      </div>
+    </div>
+
+    ${state.dayReportDrafts.length > 0 ? `
+      <h3 style="font-size:var(--text-xl);margin-bottom:var(--space-4);">Review Queue (${state.dayReportDrafts.length})</h3>
+      <div class="stack gap-6" id="dayReportDraftList" style="margin-bottom:var(--space-10);"></div>
+    ` : ''}
+
+    <h3 style="font-size:var(--text-xl);margin-bottom:var(--space-4);">Recorded Day Reports</h3>
+    <div class="card" style="padding:0;overflow-x:auto;">
+      ${state.dayReports.length === 0 ? '<div class="empty-state"><p>No day reports recorded yet.</p></div>' : `
+      <table>
+        <thead><tr><th>Date</th><th>Person</th><th>Hours</th><th>Tasks Done</th><th>Issues</th></tr></thead>
+        <tbody>
+          ${[...state.dayReports].sort((a, b) => b.date.localeCompare(a.date)).map(r => `
+            <tr>
+              <td class="text-muted">${escapeHTML(r.date)}</td>
+              <td><strong>${escapeHTML(r.person)}</strong></td>
+              <td class="text-muted">${escapeHTML(r.hours_worked || '—')}</td>
+              <td class="text-sm">${escapeHTML(r.tasks_done || '—')}</td>
+              <td class="text-sm">${escapeHTML(r.issues || '—')}</td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>`}
+    </div>
+  `;
+
+  document.getElementById('parseDayReportBtn').addEventListener('click', () => {
+    const text = document.getElementById('dayReportPasteArea').value;
+    if (!text.trim()) { toast('Paste some text first'); return; }
+    const drafts = parseDayReport(text);
+    if (drafts.length === 0) {
+      document.getElementById('dayReportParseMsg').textContent = 'No day reports detected — check formatting.';
+      return;
+    }
+    state.dayReportDrafts.push(...drafts);
+    persist();
+    document.getElementById('dayReportPasteArea').value = '';
+    toast(`${drafts.length} report${drafts.length > 1 ? 's' : ''} parsed`);
+    renderDayReports();
+  });
+  document.getElementById('clearDayReportPasteBtn').addEventListener('click', () => {
+    document.getElementById('dayReportPasteArea').value = '';
+  });
+
+  if (state.dayReportDrafts.length > 0) renderDayReportDrafts();
+}
+
+function renderDayReportDrafts() {
+  const list = document.getElementById('dayReportDraftList');
+  state.dayReportDrafts.forEach(draft => {
+    const card = document.createElement('div');
+    card.className = 'card';
+    card.innerHTML = `
+      <div class="cluster gap-3" style="justify-content:flex-end;margin-bottom:var(--space-5);">
+        <button class="btn-ghost btn-sm discard-day-report-btn" data-id="${draft.id}">Discard</button>
+      </div>
+      <div class="grid-2 gap-4">
+        <div class="field"><label>Person</label>
+          <select data-f="person">
+            <option value="">— select —</option>
+            ${personNames().map(n => `<option value="${n}" ${draft.person === n ? 'selected' : ''}>${n}</option>`).join('')}
+          </select>
+          ${(!draft.person && draft.reporter_raw) ? `<span class="text-xs" style="color:var(--color-warning);">Reported as "${escapeHTML(draft.reporter_raw)}" — not matched, pick manually</span>` : ''}
+        </div>
+        <div class="field"><label>Date</label><input type="date" data-f="date" value="${draft.date}"></div>
+        <div class="field"><label>Status</label>
+          <select data-f="status">
+            ${ATTENDANCE_STATUSES.map(s => `<option value="${s}" ${draft.status === s ? 'selected' : ''}>${s}</option>`).join('')}
+          </select>
+        </div>
+        <div class="field"><label>Hours Worked</label><input type="text" data-f="hours_worked" value="${escapeHTML(draft.hours_worked)}"></div>
+      </div>
+      <div class="field" style="margin-top:var(--space-4);"><label>Tasks Done</label><textarea data-f="tasks_done" rows="2">${escapeHTML(draft.tasks_done)}</textarea></div>
+      <div class="field" style="margin-top:var(--space-4);"><label>Issues</label><textarea data-f="issues" rows="2">${escapeHTML(draft.issues)}</textarea></div>
+      <div class="field" style="margin-top:var(--space-4);"><label>Tomorrow's Plan</label><textarea data-f="tomorrow_plan" rows="2">${escapeHTML(draft.tomorrow_plan)}</textarea></div>
+      <details style="margin-top:var(--space-4);">
+        <summary class="text-xs text-tertiary" style="cursor:pointer;">Raw pasted text</summary>
+        <pre class="mono text-xs text-tertiary" style="white-space:pre-wrap;margin-top:var(--space-2);">${escapeHTML(draft.raw_text)}</pre>
+      </details>
+      <div class="cluster gap-3" style="margin-top:var(--space-6);justify-content:flex-end;">
+        <button class="btn-primary confirm-day-report-btn" data-id="${draft.id}">Confirm &amp; Save</button>
+      </div>
+    `;
+    card.querySelectorAll('[data-f]').forEach(inp => {
+      inp.addEventListener('input', () => { draft[inp.dataset.f] = inp.value; persist(); });
+      inp.addEventListener('change', () => { draft[inp.dataset.f] = inp.value; persist(); });
+    });
+    card.querySelector('.discard-day-report-btn').addEventListener('click', () => {
+      state.dayReportDrafts = state.dayReportDrafts.filter(d => d.id !== draft.id);
+      persist();
+      renderDayReports();
+    });
+    card.querySelector('.confirm-day-report-btn').addEventListener('click', () => {
+      if (!draft.person) { toast('Select a person before confirming'); return; }
+      state.dayReports.push({
+        id: uid(), person: draft.person, date: draft.date,
+        tasks_done: draft.tasks_done, issues: draft.issues,
+        tomorrow_plan: draft.tomorrow_plan, hours_worked: draft.hours_worked,
+        raw_text: draft.raw_text
+      });
+      const rec = getOrCreateAttendance(draft.person, draft.date);
+      rec.status = draft.status;
+      state.dayReportDrafts = state.dayReportDrafts.filter(d => d.id !== draft.id);
+      persist();
+      toast('Day report saved');
+      renderDayReports();
+    });
+    list.appendChild(card);
+  });
+}
+
+/* ── Leave & Absences ── */
+
+function renderLeave() {
+  const el = document.getElementById('hrTabContent');
+  const sorted = [...state.leaveRequests].sort((a, b) => b.start_date.localeCompare(a.start_date));
+  el.innerHTML = `
+    <div class="cluster gap-3" style="justify-content:flex-end;margin-bottom:var(--space-5);">
+      <button class="btn-primary btn-sm" id="addLeaveBtn">+ Request Leave</button>
+    </div>
+    <div class="card" style="padding:0;overflow-x:auto;">
+      ${sorted.length === 0 ? '<div class="empty-state"><p>No leave requests yet.</p></div>' : `
+      <table>
+        <thead><tr><th>Person</th><th>Type</th><th>Start</th><th>End</th><th>Reason</th><th>Status</th><th></th></tr></thead>
+        <tbody>
+          ${sorted.map(l => `
+            <tr>
+              <td><strong>${escapeHTML(l.person)}</strong></td>
+              <td class="text-muted">${escapeHTML(l.type)}</td>
+              <td class="text-muted">${escapeHTML(l.start_date)}</td>
+              <td class="text-muted">${escapeHTML(l.end_date)}</td>
+              <td class="text-sm">${escapeHTML(l.reason || '—')}</td>
+              <td>${leaveStatusPill(l.status)}</td>
+              <td>
+                ${l.status === 'pending' ? `
+                  <div class="cluster gap-2">
+                    <button class="btn-ghost btn-sm approve-leave-btn" data-id="${l.id}">Approve</button>
+                    <button class="btn-ghost btn-sm reject-leave-btn" data-id="${l.id}">Reject</button>
+                  </div>` : ''}
+              </td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>`}
+    </div>
+  `;
+  document.getElementById('addLeaveBtn').addEventListener('click', openLeaveModal);
+  document.querySelectorAll('.approve-leave-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const l = state.leaveRequests.find(x => x.id === btn.dataset.id);
+      l.status = 'approved';
+      applyApprovedLeaveToAttendance(l);
+      persist();
+      toast('Leave approved');
+      renderLeave();
+    });
+  });
+  document.querySelectorAll('.reject-leave-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const l = state.leaveRequests.find(x => x.id === btn.dataset.id);
+      l.status = 'rejected';
+      persist();
+      toast('Leave rejected');
+      renderLeave();
+    });
+  });
+}
+
+function leaveStatusPill(status) {
+  if (status === 'approved') return '<span class="pill pill-success">Approved</span>';
+  if (status === 'rejected') return '<span class="pill pill-error">Rejected</span>';
+  return '<span class="pill pill-warning">Pending</span>';
+}
+
+function openLeaveModal() {
+  const modal = document.getElementById('modalContent');
+  modal.innerHTML = `
+    <div class="cluster gap-3" style="justify-content:space-between;margin-bottom:var(--space-6);">
+      <h3>Request Leave</h3>
+      <button class="btn-ghost btn-sm" id="closeModalBtn">Close</button>
+    </div>
+    <div class="grid-2 gap-4">
+      <div class="field"><label>Person</label>
+        <select id="leavePerson">${personNames().map(n => `<option value="${n}">${n}</option>`).join('')}</select>
+      </div>
+      <div class="field"><label>Leave Type</label>
+        <select id="leaveType">${state.leaveTypes.map(t => `<option value="${t}">${t}</option>`).join('')}</select>
+      </div>
+      <div class="field"><label>Start Date</label><input type="date" id="leaveStart"></div>
+      <div class="field"><label>End Date</label><input type="date" id="leaveEnd"></div>
+    </div>
+    <div class="field" style="margin-top:var(--space-4);"><label>Reason</label><textarea id="leaveReason" rows="2"></textarea></div>
+    <div class="cluster gap-3" style="margin-top:var(--space-6);justify-content:flex-end;">
+      <button class="btn-primary btn-sm" id="saveLeaveBtn">Submit</button>
+    </div>
+  `;
+  document.getElementById('modalOverlay').classList.add('active');
+  document.getElementById('closeModalBtn').addEventListener('click', closeModal);
+  document.getElementById('saveLeaveBtn').addEventListener('click', () => {
+    const start = document.getElementById('leaveStart').value;
+    const end = document.getElementById('leaveEnd').value;
+    if (!start || !end) { toast('Start and end dates are required'); return; }
+    if (end < start) { toast('End date must be on or after start date'); return; }
+    state.leaveRequests.push({
+      id: uid(),
+      person: document.getElementById('leavePerson').value,
+      type: document.getElementById('leaveType').value,
+      start_date: start,
+      end_date: end,
+      status: 'pending',
+      reason: document.getElementById('leaveReason').value.trim()
+    });
+    persist();
+    toast('Leave request submitted');
+    closeModal();
+    renderLeave();
+  });
+}
+
+/* ── Today's Assignment ── read-only join of assignments + attendance ── */
+
+function renderTodayAssignment() {
+  const el = document.getElementById('hrTabContent');
+  const date = todayISO();
+  const dayAssignments = state.assignments.filter(a => a.date === date);
+
+  el.innerHTML = `
+    <p class="text-sm text-muted" style="margin-bottom:var(--space-5);">Today — ${date}</p>
+    <div class="card" style="padding:0;overflow-x:auto;">
+      ${dayAssignments.length === 0 ? '<div class="empty-state"><p>No shift assignments set for today yet — set them in Shift Roster.</p></div>' : `
+      <table>
+        <thead><tr><th>Person</th><th>Assigned Zone</th><th>Shift</th><th>Attendance</th><th>Clocked In</th></tr></thead>
+        <tbody>
+          ${dayAssignments.map(a => {
+            const rec = state.attendance.find(x => x.person === a.intern && x.date === date);
+            return `
+              <tr>
+                <td><strong>${escapeHTML(a.intern)}</strong></td>
+                <td class="text-muted">${escapeHTML(a.zone)}</td>
+                <td class="text-muted">${escapeHTML(a.shift)}</td>
+                <td>${rec && rec.status ? attendanceStatusPill(rec.status) : '<span class="pill pill-neutral">Not clocked in</span>'}</td>
+                <td class="text-muted">${rec && rec.clock_in ? escapeHTML(rec.clock_in) : '—'}</td>
+              </tr>
+            `;
+          }).join('')}
+        </tbody>
+      </table>`}
+    </div>
+  `;
+}
+
+/* ============================================================
    VIEW: SETTINGS
    ============================================================ */
 
 function renderSettings() {
   const el = document.getElementById('view-settings');
   el.innerHTML = `
-    <div class="view-header"><div><h2>Settings</h2><p>Manage interns and zones. Data lives only in this browser's localStorage.</p></div></div>
+    <div class="view-header"><div><h2>Settings</h2><p>Manage shared reference lists. People are managed from HR &rarr; Directory. Data lives only in this browser's localStorage.</p></div></div>
 
     <div class="grid-2 gap-6">
-      <div class="card">
-        <strong>Interns</strong>
-        <div class="stack gap-2" id="internList" style="margin-top:var(--space-4);"></div>
-        <div class="cluster gap-2" style="margin-top:var(--space-4);">
-          <input type="text" id="newInternInput" placeholder="Intern name" style="flex:1;background:var(--color-bg-muted);border:1px solid var(--color-border);border-radius:var(--radius-sm);padding:var(--space-2) var(--space-3);font-size:var(--text-sm);color:var(--color-text-primary);">
-          <button class="btn-ghost btn-sm" id="addInternBtn">Add</button>
-        </div>
-      </div>
-
       <div class="card">
         <strong>Zones (with region)</strong>
         <div class="stack gap-2" id="zoneList" style="margin-top:var(--space-4);"></div>
@@ -2010,6 +2791,24 @@ function renderSettings() {
           <input type="text" id="newZoneInput" placeholder="Zone name" style="flex:1;min-width:100px;background:var(--color-bg-muted);border:1px solid var(--color-border);border-radius:var(--radius-sm);padding:var(--space-2) var(--space-3);font-size:var(--text-sm);color:var(--color-text-primary);">
           <input type="text" id="newRegionInput" placeholder="Region (island)" style="flex:1;min-width:100px;background:var(--color-bg-muted);border:1px solid var(--color-border);border-radius:var(--radius-sm);padding:var(--space-2) var(--space-3);font-size:var(--text-sm);color:var(--color-text-primary);">
           <button class="btn-ghost btn-sm" id="addZoneBtn">Add</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <strong>Departments</strong>
+        <div class="stack gap-2" id="departmentList" style="margin-top:var(--space-4);"></div>
+        <div class="cluster gap-2" style="margin-top:var(--space-4);">
+          <input type="text" id="newDepartmentInput" placeholder="Department name" style="flex:1;background:var(--color-bg-muted);border:1px solid var(--color-border);border-radius:var(--radius-sm);padding:var(--space-2) var(--space-3);font-size:var(--text-sm);color:var(--color-text-primary);">
+          <button class="btn-ghost btn-sm" id="addDepartmentBtn">Add</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <strong>Leave Types</strong>
+        <div class="stack gap-2" id="leaveTypeList" style="margin-top:var(--space-4);"></div>
+        <div class="cluster gap-2" style="margin-top:var(--space-4);">
+          <input type="text" id="newLeaveTypeInput" placeholder="Leave type" style="flex:1;background:var(--color-bg-muted);border:1px solid var(--color-border);border-radius:var(--radius-sm);padding:var(--space-2) var(--space-3);font-size:var(--text-sm);color:var(--color-text-primary);">
+          <button class="btn-ghost btn-sm" id="addLeaveTypeBtn">Add</button>
         </div>
       </div>
     </div>
@@ -2024,23 +2823,22 @@ function renderSettings() {
     </div>
   `;
 
-  document.getElementById('internList').innerHTML = state.interns.map(i => `
-    <div class="cluster gap-2" style="justify-content:space-between;">
-      <span class="text-sm">${escapeHTML(i)}</span>
-      <button class="btn-ghost btn-sm remove-intern-btn" data-name="${escapeHTML(i)}">Remove</button>
-    </div>`).join('');
   document.getElementById('zoneList').innerHTML = state.zones.map(z => `
     <div class="cluster gap-2" style="justify-content:space-between;">
       <span class="text-sm">${escapeHTML(z.name)} <span class="text-tertiary">(${escapeHTML(z.region)})</span>${!z.polygon ? ' <span class="pill pill-neutral">no boundary</span>' : ' <span class="pill pill-success">drawn</span>'}</span>
       <button class="btn-ghost btn-sm remove-zone-btn" data-name="${escapeHTML(z.name)}">Remove</button>
     </div>`).join('');
+  document.getElementById('departmentList').innerHTML = state.departments.map(d => `
+    <div class="cluster gap-2" style="justify-content:space-between;">
+      <span class="text-sm">${escapeHTML(d)}</span>
+      <button class="btn-ghost btn-sm remove-department-btn" data-name="${escapeHTML(d)}">Remove</button>
+    </div>`).join('');
+  document.getElementById('leaveTypeList').innerHTML = state.leaveTypes.map(t => `
+    <div class="cluster gap-2" style="justify-content:space-between;">
+      <span class="text-sm">${escapeHTML(t)}</span>
+      <button class="btn-ghost btn-sm remove-leave-type-btn" data-name="${escapeHTML(t)}">Remove</button>
+    </div>`).join('');
 
-  document.getElementById('addInternBtn').addEventListener('click', () => {
-    const val = document.getElementById('newInternInput').value.trim();
-    if (!val) return;
-    if (!state.interns.includes(val)) state.interns.push(val);
-    persist(); renderSettings();
-  });
   document.getElementById('addZoneBtn').addEventListener('click', () => {
     const name = document.getElementById('newZoneInput').value.trim();
     const region = document.getElementById('newRegionInput').value.trim();
@@ -2048,15 +2846,33 @@ function renderSettings() {
     state.zones.push({ name, region });
     persist(); renderSettings();
   });
-  document.querySelectorAll('.remove-intern-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      state.interns = state.interns.filter(i => i !== btn.dataset.name);
-      persist(); renderSettings();
-    });
+  document.getElementById('addDepartmentBtn').addEventListener('click', () => {
+    const val = document.getElementById('newDepartmentInput').value.trim();
+    if (!val) return;
+    if (!state.departments.includes(val)) state.departments.push(val);
+    persist(); renderSettings();
+  });
+  document.getElementById('addLeaveTypeBtn').addEventListener('click', () => {
+    const val = document.getElementById('newLeaveTypeInput').value.trim();
+    if (!val) return;
+    if (!state.leaveTypes.includes(val)) state.leaveTypes.push(val);
+    persist(); renderSettings();
   });
   document.querySelectorAll('.remove-zone-btn').forEach(btn => {
     btn.addEventListener('click', () => {
       state.zones = state.zones.filter(z => z.name !== btn.dataset.name);
+      persist(); renderSettings();
+    });
+  });
+  document.querySelectorAll('.remove-department-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      state.departments = state.departments.filter(d => d !== btn.dataset.name);
+      persist(); renderSettings();
+    });
+  });
+  document.querySelectorAll('.remove-leave-type-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      state.leaveTypes = state.leaveTypes.filter(t => t !== btn.dataset.name);
       persist(); renderSettings();
     });
   });
@@ -2069,8 +2885,14 @@ function renderSettings() {
     URL.revokeObjectURL(url);
   });
   document.getElementById('clearAllBtn').addEventListener('click', () => {
-    if (!confirm('This will permanently delete all outlets, visits, assignments, and drafts. Continue?')) return;
-    state = { outlets: [], visits: [], assignments: [], interns: state.interns, zones: state.zones, drafts: [] };
+    if (!confirm('This will permanently delete all outlets, visits, assignments, attendance, day reports, and leave requests. Continue?')) return;
+    state = {
+      outlets: [], visits: [], assignments: [],
+      people: state.people, departments: state.departments,
+      zones: state.zones, drafts: [],
+      attendance: [], dayReportDrafts: [], dayReports: [],
+      leaveTypes: state.leaveTypes, leaveRequests: []
+    };
     persist();
     toast('All data cleared');
     renderAll();
@@ -2104,6 +2926,7 @@ function renderAll() {
   renderInterns();
   renderSoftware();
   renderRoster();
+  renderHR();
   renderSettings();
   updateNavCounts();
   refreshSoftwareSuggestions();
@@ -2125,6 +2948,7 @@ document.getElementById('nav').addEventListener('click', e => {
   if (view === 'interns') renderInterns();
   if (view === 'software') renderSoftware();
   if (view === 'roster') renderRoster();
+  if (view === 'hr') renderHR();
   if (view === 'settings') renderSettings();
 });
 
