@@ -2811,7 +2811,7 @@ function renderClockInOut() {
       rec[inp.dataset.field] = inp.value;
       if (inp.dataset.field === 'clock_in') {
         rec.late_minutes = computeLateMinutes(inp.dataset.name, date, inp.value);
-        if (inp.value) applyClockInStatus(rec, inp.dataset.name, date);
+        applyClockInStatus(rec, inp.dataset.name, date);
       }
       persist();
       renderClockInOut();
@@ -2833,10 +2833,12 @@ function formatLateMinutes(mins) {
   const h = Math.floor(mins / 60), m = mins % 60;
   return h > 0 ? `${h}h ${m}m late` : `${m}m late`;
 }
-/* Only sets status if it isn't already set, so it never overwrites a
-   manual pick (e.g. someone marked "Half Day" in the Attendance tab). */
+/* Late/Present are derived from the clock-in time, so they stay live as
+   that time changes. Any other status (Half Day / On Leave / Absent) was
+   set manually — e.g. in the Attendance tab — and is left untouched. */
 function applyClockInStatus(rec, personName, date) {
-  if (rec.status) return;
+  if (rec.status && rec.status !== 'Late' && rec.status !== 'Present') return;
+  if (!rec.clock_in) { rec.status = ''; return; }
   rec.status = rec.late_minutes > 0 ? 'Late' : 'Present';
 }
 
