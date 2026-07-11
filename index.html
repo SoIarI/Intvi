@@ -347,7 +347,9 @@ const STORAGE_KEYS = {
   tasks: 'vi_tasks',
   dayLogAutosaves: 'vi_daylog_autosaves',
   dayLogHistory: 'vi_daylog_history',
-  softwareColors: 'vi_software_colors'
+  softwareColors: 'vi_software_colors',
+  shiftTypes: 'vi_shift_types',
+  shiftAssignments: 'vi_hr_shift_assignments'
 };
 
 // Friendly names for the JSON-import preview table — keys match STORAGE_KEYS.
@@ -356,7 +358,7 @@ const STORAGE_LABELS = {
   departments: 'Departments', zones: 'Zones', drafts: 'Review Drafts', attendance: 'Attendance',
   dayReportDrafts: 'Day Report Drafts', dayReports: 'Day Reports', leaveTypes: 'Leave Types',
   leaveRequests: 'Leave Requests', tasks: 'Tasks', dayLogAutosaves: 'Day Logger Drafts', dayLogHistory: 'Day Logger History',
-  softwareColors: 'Software Colors'
+  softwareColors: 'Software Colors', shiftTypes: 'Shift Types', shiftAssignments: 'HR Shift Assignments'
 };
 
 const DEFAULT_ZONES = [
@@ -386,6 +388,14 @@ const SOFTWARE_COLOR_PALETTE = ['#8B0000', '#3A6EA5', '#3A9E5F', '#D97706', '#6B
 
 const DEFAULT_DEPARTMENTS = ['Sales', 'Support', 'Field Interns', 'Operations'];
 const DEFAULT_LEAVE_TYPES = ['Annual', 'Sick', 'Emergency', 'Unpaid'];
+// HR's own shift definitions (name + start/end time), separate from the
+// field-ops Shift Roster's zone-assignment shifts (SHIFTS, below) — these
+// drive Clock In/Out's per-day shift assignment and late-cutoff calculation.
+const DEFAULT_SHIFT_TYPES = [
+  { id: 'morning', name: 'Morning', start: '08:00', end: '16:00' },
+  { id: 'afternoon', name: 'Afternoon', start: '12:00', end: '20:00' },
+  { id: 'evening', name: 'Evening', start: '16:00', end: '00:00' }
+];
 const EMPLOYMENT_TYPES = ['Full-time', 'Part-time', 'Intern', 'Contract'];
 const PERSON_STATUSES = ['Onboarding', 'Active', 'Inactive'];
 const ATTENDANCE_STATUSES = ['Present', 'Absent', 'Late', 'Half Day', 'On Leave'];
@@ -504,7 +514,9 @@ let state = {
   tasks: loadJSON(STORAGE_KEYS.tasks, []),
   dayLogAutosaves: loadJSON(STORAGE_KEYS.dayLogAutosaves, []),
   dayLogHistory: loadJSON(STORAGE_KEYS.dayLogHistory, []),
-  softwareColors: loadJSON(STORAGE_KEYS.softwareColors, { ...DEFAULT_SOFTWARE_COLORS })
+  softwareColors: loadJSON(STORAGE_KEYS.softwareColors, { ...DEFAULT_SOFTWARE_COLORS }),
+  shiftTypes: loadJSON(STORAGE_KEYS.shiftTypes, DEFAULT_SHIFT_TYPES.slice()),
+  shiftAssignments: loadJSON(STORAGE_KEYS.shiftAssignments, [])
 };
 
 function persist() {
@@ -524,6 +536,8 @@ function persist() {
   saveJSON(STORAGE_KEYS.dayLogAutosaves, state.dayLogAutosaves);
   saveJSON(STORAGE_KEYS.dayLogHistory, state.dayLogHistory);
   saveJSON(STORAGE_KEYS.softwareColors, state.softwareColors);
+  saveJSON(STORAGE_KEYS.shiftTypes, state.shiftTypes);
+  saveJSON(STORAGE_KEYS.shiftAssignments, state.shiftAssignments);
 }
 
 function toast(msg) {
@@ -562,6 +576,22 @@ function getOrCreateAttendance(personName, date) {
     state.attendance.push(rec);
   }
   return rec;
+}
+
+/* ── HR shift timings (Clock In/Out) — a shift is a named time range
+   (e.g. Morning 08:00–16:00); a shift assignment binds a person to one
+   of those shifts on a specific date. Separate from the field-ops
+   Shift Roster's zone assignments (state.assignments). ── */
+function getShiftType(id) {
+  return state.shiftTypes.find(s => s.id === id) || null;
+}
+function getShiftAssignment(personName, date) {
+  return state.shiftAssignments.find(a => a.person === personName && a.date === date) || null;
+}
+function timeToMinutes(str) {
+  if (!str) return null;
+  const [h, m] = str.split(':').map(Number);
+  return h * 60 + m;
 }
 
 function isUnexplainedAbsence(personName, date) {
@@ -2257,6 +2287,7 @@ function renderAssignedVsActual() {
 
 const HR_TABS = [
   { key: 'directory', label: 'Directory' },
+  { key: 'shifts', label: 'Shifts' },
   { key: 'clock', label: 'Clock In/Out' },
   { key: 'attendance', label: 'Attendance' },
   { key: 'dayreports', label: 'Day Reports' },
@@ -2288,6 +2319,7 @@ function renderHR() {
 
 function renderHRTabContent() {
   if (hrActiveTab === 'directory') renderPeopleDirectory();
+  else if (hrActiveTab === 'shifts') renderHRShifts();
   else if (hrActiveTab === 'clock') renderClockInOut();
   else if (hrActiveTab === 'attendance') renderHRAttendance();
   else if (hrActiveTab === 'dayreports') renderDayReports();
@@ -2428,7 +2460,102 @@ function monthlyAttendancePct(personName) {
   return Math.round((good / recs.length) * 100);
 }
 
+/* ── HR Shifts — shift timings + per-day per-person shift assignment.
+   Feeds Clock In/Out's shift display and late-cutoff calculation. ── */
+
+let hrShiftAssignDate = todayISO();
+
+function renderHRShifts() {
+  const el = document.getElementById('hrTabContent');
+  const sorted = [...state.people].sort((a, b) => a.name.localeCompare(b.name));
+
+  el.innerHTML = `
+    <h3 style="font-size:var(--text-xl);margin-bottom:var(--space-2);">Shift Timings</h3>
+    <p class="text-sm text-muted" style="margin-bottom:var(--space-4);">Define the shifts available for assignment below.</p>
+    <div class="card" style="margin-bottom:var(--space-8);">
+      <div class="stack gap-2" id="shiftTypeList"></div>
+      <div class="cluster gap-2" style="margin-top:var(--space-4);flex-wrap:wrap;">
+        <input type="text" id="newShiftNameInput" placeholder="Shift name" style="flex:1;min-width:120px;background:var(--color-bg-muted);border:1px solid var(--color-border);border-radius:var(--radius-sm);padding:var(--space-2) var(--space-3);font-size:var(--text-sm);color:var(--color-text-primary);">
+        <input type="time" id="newShiftStartInput" style="background:var(--color-bg-muted);border:1px solid var(--color-border);border-radius:var(--radius-sm);padding:var(--space-2) var(--space-3);font-size:var(--text-sm);color:var(--color-text-primary);">
+        <span class="text-tertiary text-sm">to</span>
+        <input type="time" id="newShiftEndInput" style="background:var(--color-bg-muted);border:1px solid var(--color-border);border-radius:var(--radius-sm);padding:var(--space-2) var(--space-3);font-size:var(--text-sm);color:var(--color-text-primary);">
+        <button class="btn-ghost btn-sm" id="addShiftTypeBtn">Add</button>
+      </div>
+    </div>
+
+    <div class="view-header">
+      <div><h3 style="font-size:var(--text-xl);">Assign Shifts</h3><p class="text-sm text-muted">Give each person a shift for the selected date.</p></div>
+      <div class="field" style="min-width:180px;"><label>Date</label><input type="date" id="shiftAssignDateInput" value="${hrShiftAssignDate}"></div>
+    </div>
+    <div class="card" style="padding:0;overflow-x:auto;">
+      ${sorted.length === 0 ? '<div class="empty-state"><p>No people on record yet — add them in Directory.</p></div>' : `
+      <table>
+        <thead><tr><th>Name</th><th>Shift</th></tr></thead>
+        <tbody>
+          ${sorted.map(p => {
+            const assignment = getShiftAssignment(p.name, hrShiftAssignDate);
+            return `
+              <tr>
+                <td><strong>${escapeHTML(p.name)}</strong></td>
+                <td>
+                  <select data-name="${escapeHTML(p.name)}" class="shift-assign-select">
+                    <option value="">— unassigned —</option>
+                    ${state.shiftTypes.map(s => `<option value="${s.id}" ${assignment && assignment.shiftTypeId === s.id ? 'selected' : ''}>${escapeHTML(s.name)} (${s.start}–${s.end})</option>`).join('')}
+                  </select>
+                </td>
+              </tr>
+            `;
+          }).join('')}
+        </tbody>
+      </table>`}
+    </div>
+  `;
+
+  document.getElementById('shiftTypeList').innerHTML = state.shiftTypes.length === 0
+    ? '<p class="text-sm text-tertiary">No shifts defined yet.</p>'
+    : state.shiftTypes.map(s => `
+      <div class="cluster gap-2" style="justify-content:space-between;">
+        <span class="text-sm">${escapeHTML(s.name)} <span class="text-tertiary">(${s.start}–${s.end})</span></span>
+        <button class="btn-ghost btn-sm remove-shift-type-btn" data-id="${s.id}">Remove</button>
+      </div>`).join('');
+
+  document.getElementById('addShiftTypeBtn').addEventListener('click', () => {
+    const name = document.getElementById('newShiftNameInput').value.trim();
+    const start = document.getElementById('newShiftStartInput').value;
+    const end = document.getElementById('newShiftEndInput').value;
+    if (!name || !start || !end) { toast('Shift name, start, and end are all required'); return; }
+    state.shiftTypes.push({ id: uid(), name, start, end });
+    persist();
+    renderHRShifts();
+  });
+  document.querySelectorAll('.remove-shift-type-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      state.shiftTypes = state.shiftTypes.filter(s => s.id !== btn.dataset.id);
+      state.shiftAssignments = state.shiftAssignments.filter(a => a.shiftTypeId !== btn.dataset.id);
+      persist();
+      renderHRShifts();
+    });
+  });
+  document.getElementById('shiftAssignDateInput').addEventListener('change', e => {
+    hrShiftAssignDate = e.target.value;
+    renderHRShifts();
+  });
+  document.querySelectorAll('.shift-assign-select').forEach(sel => {
+    sel.addEventListener('change', () => {
+      const person = sel.dataset.name;
+      state.shiftAssignments = state.shiftAssignments.filter(a => !(a.person === person && a.date === hrShiftAssignDate));
+      if (sel.value) {
+        state.shiftAssignments.push({ id: uid(), person, date: hrShiftAssignDate, shiftTypeId: sel.value });
+      }
+      persist();
+      toast(`${person}'s shift updated`);
+    });
+  });
+}
+
 /* ── Clock In / Clock Out ── */
+
+const CLOCK_TIME_INPUT_STYLE = 'background:var(--color-bg-muted);border:1px solid var(--color-border);border-radius:var(--radius-sm);padding:var(--space-2) var(--space-3);font-size:var(--text-sm);color:var(--color-text-primary);';
 
 function renderClockInOut() {
   const el = document.getElementById('hrTabContent');
@@ -2439,18 +2566,21 @@ function renderClockInOut() {
     <div class="card" style="padding:0;overflow-x:auto;">
       ${sorted.length === 0 ? '<div class="empty-state"><p>No people on record yet — add them in Directory.</p></div>' : `
       <table>
-        <thead><tr><th>Name</th><th>Status</th><th>Clocked In</th><th>Clocked Out</th><th></th></tr></thead>
+        <thead><tr><th>Name</th><th>Shift</th><th>Status</th><th>Clocked In</th><th>Clocked Out</th><th></th></tr></thead>
         <tbody>
           ${sorted.map(p => {
             const rec = state.attendance.find(a => a.person === p.name && a.date === date);
             const clockedIn = rec && rec.clock_in;
             const clockedOut = rec && rec.clock_out;
+            const assignment = getShiftAssignment(p.name, date);
+            const shiftType = assignment ? getShiftType(assignment.shiftTypeId) : null;
             return `
               <tr>
                 <td><strong>${escapeHTML(p.name)}</strong></td>
+                <td class="text-muted">${shiftType ? `${escapeHTML(shiftType.name)} <span class="text-tertiary">(${shiftType.start}–${shiftType.end})</span>` : '<span class="text-tertiary">— unassigned —</span>'}</td>
                 <td>${rec && rec.status ? attendanceStatusPill(rec.status) : '<span class="pill pill-neutral">Not clocked in</span>'}</td>
-                <td class="text-muted">${clockedIn ? escapeHTML(clockedIn) : '—'}</td>
-                <td class="text-muted">${clockedOut ? escapeHTML(clockedOut) : '—'}</td>
+                <td><input type="time" class="clock-time-input" data-name="${escapeHTML(p.name)}" data-field="clock_in" value="${clockedIn || ''}" style="${CLOCK_TIME_INPUT_STYLE}"></td>
+                <td><input type="time" class="clock-time-input" data-name="${escapeHTML(p.name)}" data-field="clock_out" value="${clockedOut || ''}" style="${CLOCK_TIME_INPUT_STYLE}"></td>
                 <td>
                   ${!clockedIn ? `<button class="btn-primary btn-sm clock-in-btn" data-name="${escapeHTML(p.name)}">Clock In</button>` :
                     !clockedOut ? `<button class="btn-ghost btn-sm clock-out-btn" data-name="${escapeHTML(p.name)}">Clock Out</button>` :
@@ -2468,9 +2598,7 @@ function renderClockInOut() {
       const rec = getOrCreateAttendance(btn.dataset.name, date);
       const now = new Date();
       rec.clock_in = now.toTimeString().slice(0, 5);
-      const cutoffMinutes = 9 * 60 + 30; // 9:30am
-      const nowMinutes = now.getHours() * 60 + now.getMinutes();
-      if (!rec.status) rec.status = nowMinutes > cutoffMinutes ? 'Late' : 'Present';
+      applyClockInStatus(rec, btn.dataset.name, date);
       persist();
       toast(`${btn.dataset.name} clocked in`);
       renderClockInOut();
@@ -2485,6 +2613,28 @@ function renderClockInOut() {
       renderClockInOut();
     });
   });
+  document.querySelectorAll('.clock-time-input').forEach(inp => {
+    inp.addEventListener('change', () => {
+      const rec = getOrCreateAttendance(inp.dataset.name, date);
+      rec[inp.dataset.field] = inp.value;
+      if (inp.dataset.field === 'clock_in' && inp.value) applyClockInStatus(rec, inp.dataset.name, date);
+      persist();
+      renderClockInOut();
+    });
+  });
+}
+
+/* Late cutoff is the person's assigned shift start for that date if one
+   exists, falling back to a default 9:30am cutoff otherwise. Only sets
+   status if it isn't already set, so it never overwrites a manual pick
+   (e.g. someone marked "Half Day" in the Attendance tab). */
+function applyClockInStatus(rec, personName, date) {
+  if (rec.status) return;
+  const assignment = getShiftAssignment(personName, date);
+  const shiftType = assignment ? getShiftType(assignment.shiftTypeId) : null;
+  const cutoffMinutes = shiftType ? timeToMinutes(shiftType.start) : (9 * 60 + 30);
+  const clockInMinutes = timeToMinutes(rec.clock_in);
+  rec.status = clockInMinutes > cutoffMinutes ? 'Late' : 'Present';
 }
 
 function attendanceStatusPill(status) {
@@ -3192,7 +3342,8 @@ function renderSettings() {
       leaveTypes: state.leaveTypes, leaveRequests: [],
       tasks: [],
       dayLogAutosaves: [], dayLogHistory: [],
-      softwareColors: state.softwareColors
+      softwareColors: state.softwareColors,
+      shiftTypes: state.shiftTypes, shiftAssignments: []
     };
     persist();
     toast('All data cleared');
