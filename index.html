@@ -3445,27 +3445,56 @@ function formatTasksMessageForDate(date) {
 /* ── Tasks ── freetext task assigned to a person at a specific hour, with a completion checkbox ── */
 
 let taskViewDate = todayISO();
+let taskFilters = { done: '', hour: '', person: '', task: '' };
+
+function taskFilterSelectHTML(key, options, current) {
+  return `<select class="task-filter-select" data-key="${key}" style="width:100%;font-size:var(--text-xs);background:var(--color-bg-muted);border:1px solid var(--color-border);border-radius:var(--radius-sm);padding:var(--space-1) var(--space-2);color:var(--color-text-primary);">
+    <option value="">All</option>
+    ${options.map(o => `<option value="${escapeHTML(o.value)}" ${o.value === current ? 'selected' : ''}>${escapeHTML(o.label)}</option>`).join('')}
+  </select>`;
+}
 
 function renderHRTasks() {
   const el = document.getElementById('hrTabContent');
-  const dayTasks = state.tasks
+  const dayTasksAll = state.tasks
     .filter(t => t.date === taskViewDate)
     .sort((a, b) => a.hour.localeCompare(b.hour));
+  const hasFilters = Object.values(taskFilters).some(v => v);
+  const dayTasks = dayTasksAll.filter(t => {
+    if (taskFilters.done === 'done' && !t.done) return false;
+    if (taskFilters.done === 'pending' && t.done) return false;
+    if (taskFilters.hour && t.hour !== taskFilters.hour) return false;
+    if (taskFilters.person && t.person !== taskFilters.person) return false;
+    if (taskFilters.task && !t.task.toLowerCase().includes(taskFilters.task.toLowerCase())) return false;
+    return true;
+  });
+  const distinctHours = [...new Set(dayTasksAll.map(t => t.hour))].sort();
+  const distinctPersons = [...new Set(dayTasksAll.map(t => t.person))].sort((a, b) => a.localeCompare(b));
 
   el.innerHTML = `
     <div class="cluster gap-3" style="justify-content:space-between;margin-bottom:var(--space-5);flex-wrap:wrap;">
       <div class="field" style="min-width:180px;"><label>Date</label><input type="date" id="taskDateInput" value="${taskViewDate}"></div>
       <div class="cluster gap-2">
+        ${hasFilters ? '<button class="btn-ghost btn-sm" id="clearTaskFiltersBtn">Clear Filters</button>' : ''}
         <button class="btn-ghost btn-sm" id="pushTasksTelegramBtn">Push to Telegram</button>
         <button class="btn-primary btn-sm" id="addTaskBtn">+ Assign Task</button>
       </div>
     </div>
     <div class="card" style="padding:0;overflow-x:auto;">
-      ${dayTasks.length === 0 ? '<div class="empty-state"><p>No tasks assigned for this date yet.</p></div>' : `
+      ${dayTasksAll.length === 0 ? '<div class="empty-state"><p>No tasks assigned for this date yet.</p></div>' : `
       <table>
-        <thead><tr><th></th><th>Hour</th><th>Person</th><th>Task</th><th></th></tr></thead>
+        <thead>
+          <tr><th></th><th>Hour</th><th>Person</th><th>Task</th><th></th></tr>
+          <tr>
+            <td style="padding:var(--space-2) var(--space-4);">${taskFilterSelectHTML('done', [{ value: 'pending', label: 'Pending' }, { value: 'done', label: 'Done' }], taskFilters.done)}</td>
+            <td style="padding:var(--space-2) var(--space-4);">${taskFilterSelectHTML('hour', distinctHours.map(h => ({ value: h, label: h })), taskFilters.hour)}</td>
+            <td style="padding:var(--space-2) var(--space-4);">${taskFilterSelectHTML('person', distinctPersons.map(p => ({ value: p, label: p })), taskFilters.person)}</td>
+            <td style="padding:var(--space-2) var(--space-4);"><input type="text" id="taskSearchFilter" placeholder="Search task..." value="${escapeHTML(taskFilters.task)}" style="width:100%;font-size:var(--text-xs);background:var(--color-bg-muted);border:1px solid var(--color-border);border-radius:var(--radius-sm);padding:var(--space-1) var(--space-2);color:var(--color-text-primary);"></td>
+            <td></td>
+          </tr>
+        </thead>
         <tbody>
-          ${dayTasks.map(t => `
+          ${dayTasks.length === 0 ? `<tr><td colspan="5"><div class="empty-state"><p>No tasks match these filters.</p></div></td></tr>` : dayTasks.map(t => `
             <tr style="${t.done ? 'opacity:0.6;' : ''}">
               <td><input type="checkbox" class="task-done-checkbox" data-id="${t.id}" ${t.done ? 'checked' : ''}></td>
               <td class="text-muted">${escapeHTML(t.hour)}</td>
@@ -3481,6 +3510,7 @@ function renderHRTasks() {
 
   document.getElementById('taskDateInput').addEventListener('change', e => {
     taskViewDate = e.target.value;
+    taskFilters = { done: '', hour: '', person: '', task: '' };
     renderHRTasks();
   });
   document.getElementById('addTaskBtn').addEventListener('click', openTaskModal);
@@ -3488,6 +3518,25 @@ function renderHRTasks() {
     const message = formatTasksMessageForDate(taskViewDate);
     if (!message) { toast('No tasks to push for this date'); return; }
     sendTelegramMessage(message);
+  });
+  const clearBtn = document.getElementById('clearTaskFiltersBtn');
+  if (clearBtn) clearBtn.addEventListener('click', () => {
+    taskFilters = { done: '', hour: '', person: '', task: '' };
+    renderHRTasks();
+  });
+  document.querySelectorAll('.task-filter-select').forEach(sel => {
+    sel.addEventListener('change', () => {
+      taskFilters[sel.dataset.key] = sel.value;
+      renderHRTasks();
+    });
+  });
+  const taskSearchInput = document.getElementById('taskSearchFilter');
+  if (taskSearchInput) taskSearchInput.addEventListener('input', e => {
+    taskFilters.task = e.target.value;
+    const cursorPos = e.target.selectionStart;
+    renderHRTasks();
+    const newInput = document.getElementById('taskSearchFilter');
+    if (newInput) { newInput.focus(); newInput.setSelectionRange(cursorPos, cursorPos); }
   });
   document.querySelectorAll('.task-done-checkbox').forEach(cb => {
     cb.addEventListener('change', () => {
