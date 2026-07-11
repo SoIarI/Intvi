@@ -1970,7 +1970,10 @@ function renderInterns() {
     const inCrm = visits.filter(v => v.crm_status_at_time === 'in_crm').length;
     const pct = visits.length ? Math.round((inCrm / visits.length) * 100) : 0;
     const lastVisit = visits.length ? visits.map(v => v.visited_at).sort().slice(-1)[0] : '—';
-    return { name, total: visits.length, unique: outletIds.size, zones: zones.size, pct, lastVisit };
+    const lateRecords = state.attendance.filter(a => a.person === name && a.late_minutes > 0);
+    const lateDays = lateRecords.length;
+    const totalLateMinutes = lateRecords.reduce((sum, a) => sum + a.late_minutes, 0);
+    return { name, total: visits.length, unique: outletIds.size, zones: zones.size, pct, lastVisit, lateDays, totalLateMinutes };
   }).sort((a, b) => b.total - a.total);
 
   el.innerHTML = `
@@ -1980,7 +1983,7 @@ function renderInterns() {
     <div class="card" style="padding:0;overflow-x:auto;">
       ${rows.length === 0 ? '<div class="empty-state"><p>No visits logged yet.</p></div>' : `
       <table>
-        <thead><tr><th>Intern</th><th>Total Visits</th><th>Unique Outlets</th><th>Zones Covered</th><th>% In CRM</th><th>Last Visit</th></tr></thead>
+        <thead><tr><th>Intern</th><th>Total Visits</th><th>Unique Outlets</th><th>Zones Covered</th><th>% In CRM</th><th>Last Visit</th><th>Late Days</th><th>Total Late Time</th></tr></thead>
         <tbody>
           ${rows.map(r => `
             <tr>
@@ -1997,6 +2000,8 @@ function renderInterns() {
                 </div>
               </td>
               <td class="text-muted">${escapeHTML(r.lastVisit)}</td>
+              <td class="text-muted">${r.lateDays || '—'}</td>
+              <td class="text-muted">${r.totalLateMinutes ? formatLateMinutes(r.totalLateMinutes).replace(' late', '') : '—'}</td>
             </tr>
           `).join('')}
         </tbody>
@@ -2764,7 +2769,7 @@ function renderClockInOut() {
               <tr>
                 <td><strong>${escapeHTML(p.name)}</strong></td>
                 <td class="text-muted">${shiftType ? `${escapeHTML(shiftType.name)} <span class="text-tertiary">(${shiftType.start}–${shiftType.end})</span>` : '<span class="text-tertiary">— unassigned —</span>'}</td>
-                <td>${rec && rec.status ? attendanceStatusPill(rec.status) : '<span class="pill pill-neutral">Not clocked in</span>'}</td>
+                <td>${rec && rec.status ? attendanceStatusPill(rec.status) + (rec.late_minutes ? ` <span class="text-xs text-tertiary">(${formatLateMinutes(rec.late_minutes)})</span>` : '') : '<span class="pill pill-neutral">Not clocked in</span>'}</td>
                 <td><input type="time" class="clock-time-input" data-name="${escapeHTML(p.name)}" data-field="clock_in" value="${clockedIn || ''}" style="${CLOCK_TIME_INPUT_STYLE}"></td>
                 <td><input type="time" class="clock-time-input" data-name="${escapeHTML(p.name)}" data-field="clock_out" value="${clockedOut || ''}" style="${CLOCK_TIME_INPUT_STYLE}"></td>
                 <td>
@@ -2784,6 +2789,7 @@ function renderClockInOut() {
       const rec = getOrCreateAttendance(btn.dataset.name, date);
       const now = new Date();
       rec.clock_in = now.toTimeString().slice(0, 5);
+      rec.late_minutes = computeLateMinutes(btn.dataset.name, date, rec.clock_in);
       applyClockInStatus(rec, btn.dataset.name, date);
       persist();
       toast(`${btn.dataset.name} clocked in`);
@@ -2803,7 +2809,10 @@ function renderClockInOut() {
     inp.addEventListener('change', () => {
       const rec = getOrCreateAttendance(inp.dataset.name, date);
       rec[inp.dataset.field] = inp.value;
-      if (inp.dataset.field === 'clock_in' && inp.value) applyClockInStatus(rec, inp.dataset.name, date);
+      if (inp.dataset.field === 'clock_in') {
+        rec.late_minutes = computeLateMinutes(inp.dataset.name, date, inp.value);
+        if (inp.value) applyClockInStatus(rec, inp.dataset.name, date);
+      }
       persist();
       renderClockInOut();
     });
@@ -2811,15 +2820,24 @@ function renderClockInOut() {
 }
 
 /* Late cutoff is the person's assigned shift start for that date if one
-   exists, falling back to a default 9:30am cutoff otherwise. Only sets
-   status if it isn't already set, so it never overwrites a manual pick
-   (e.g. someone marked "Half Day" in the Attendance tab). */
-function applyClockInStatus(rec, personName, date) {
-  if (rec.status) return;
+   exists, falling back to a default 9:30am cutoff otherwise. */
+function computeLateMinutes(personName, date, clockInStr) {
+  if (!clockInStr) return 0;
   const shiftType = getEffectiveShiftType(personName, date);
   const cutoffMinutes = shiftType ? timeToMinutes(shiftType.start) : (9 * 60 + 30);
-  const clockInMinutes = timeToMinutes(rec.clock_in);
-  rec.status = clockInMinutes > cutoffMinutes ? 'Late' : 'Present';
+  const clockInMinutes = timeToMinutes(clockInStr);
+  return Math.max(0, clockInMinutes - cutoffMinutes);
+}
+function formatLateMinutes(mins) {
+  if (!mins) return '';
+  const h = Math.floor(mins / 60), m = mins % 60;
+  return h > 0 ? `${h}h ${m}m late` : `${m}m late`;
+}
+/* Only sets status if it isn't already set, so it never overwrites a
+   manual pick (e.g. someone marked "Half Day" in the Attendance tab). */
+function applyClockInStatus(rec, personName, date) {
+  if (rec.status) return;
+  rec.status = rec.late_minutes > 0 ? 'Late' : 'Present';
 }
 
 function attendanceStatusPill(status) {
