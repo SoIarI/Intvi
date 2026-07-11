@@ -1649,6 +1649,9 @@ let outletFilters = {
 let outletPage = 1;
 let outletPageSize = 25;
 const OUTLET_PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
+// Sentinel filter value for "no software recorded" — distinct from '' (All),
+// since a blank current_software is excluded from distinctOutletValues.
+const OUTLET_SOFTWARE_NONE_VALUE = '__none__';
 
 function outletColumnValue(o, key) {
   if (key === 'visits') return String(outletVisitCount(o.id));
@@ -1679,7 +1682,8 @@ function filteredOutlets() {
     if (outletFilters.business_name && !normalizeName(o.business_name).includes(normalizeName(outletFilters.business_name))) return false;
     if (outletFilters.business_type && outletColumnValue(o, 'business_type') !== outletFilters.business_type) return false;
     if (outletFilters.zone && outletColumnValue(o, 'zone') !== outletFilters.zone) return false;
-    if (outletFilters.current_software && outletColumnValue(o, 'current_software') !== outletFilters.current_software) return false;
+    if (outletFilters.current_software === OUTLET_SOFTWARE_NONE_VALUE && o.current_software) return false;
+    if (outletFilters.current_software && outletFilters.current_software !== OUTLET_SOFTWARE_NONE_VALUE && outletColumnValue(o, 'current_software') !== outletFilters.current_software) return false;
     if (outletFilters.crm_status && outletColumnValue(o, 'crm_status') !== outletFilters.crm_status) return false;
     if (outletFilters.last_visited === 'visited' && !o.last_visited_at) return false;
     if (outletFilters.last_visited === 'not_visited' && o.last_visited_at) return false;
@@ -1706,6 +1710,7 @@ function renderOutlets() {
       <div><h2>Outlets</h2><p>${state.outlets.length} outlet${state.outlets.length !== 1 ? 's' : ''} tracked. Click a row for full visit history.</p></div>
       <div class="cluster gap-3">
         ${hasFilters ? '<button class="btn-ghost btn-sm" id="clearOutletFiltersBtn">Clear Filters</button>' : ''}
+        <button class="btn-ghost btn-sm" id="exportOutletsCsvBtn">Export CSV${hasFilters ? ` (${filtered.length})` : ''}</button>
         <button class="btn-primary btn-sm" id="addOutletBtn">+ Add Outlet</button>
       </div>
     </div>
@@ -1720,7 +1725,7 @@ function renderOutlets() {
             <td style="padding:var(--space-2) var(--space-4);"><input type="text" id="outletSearchFilter" placeholder="Search..." value="${escapeHTML(outletFilters.business_name)}" style="width:100%;font-size:var(--text-xs);background:var(--color-bg-muted);border:1px solid var(--color-border);border-radius:var(--radius-sm);padding:var(--space-1) var(--space-2);color:var(--color-text-primary);"></td>
             <td style="padding:var(--space-2) var(--space-4);">${outletFilterSelectHTML('business_type', distinctOutletValues('business_type').map(v => ({ value: v, label: v })), outletFilters.business_type)}</td>
             <td style="padding:var(--space-2) var(--space-4);">${outletFilterSelectHTML('zone', distinctOutletValues('zone').map(v => ({ value: v, label: v })), outletFilters.zone)}</td>
-            <td style="padding:var(--space-2) var(--space-4);">${outletFilterSelectHTML('current_software', distinctOutletValues('current_software').map(v => ({ value: v, label: v })), outletFilters.current_software)}</td>
+            <td style="padding:var(--space-2) var(--space-4);">${outletFilterSelectHTML('current_software', [{ value: OUTLET_SOFTWARE_NONE_VALUE, label: '— None —' }, ...distinctOutletValues('current_software').map(v => ({ value: v, label: v }))], outletFilters.current_software)}</td>
             <td style="padding:var(--space-2) var(--space-4);">${outletFilterSelectHTML('crm_status', ['unchecked', 'in_crm', 'not_in_crm'].map(v => ({ value: v, label: crmStatusLabel(v) })), outletFilters.crm_status)}</td>
             <td style="padding:var(--space-2) var(--space-4);">${outletFilterSelectHTML('last_visited', [{ value: 'visited', label: 'Visited' }, { value: 'not_visited', label: 'Not visited yet' }], outletFilters.last_visited)}</td>
             <td style="padding:var(--space-2) var(--space-4);">${outletFilterSelectHTML('last_visited_by', distinctOutletValues('last_visited_by').map(v => ({ value: v, label: v })), outletFilters.last_visited_by)}</td>
@@ -1758,6 +1763,7 @@ function renderOutlets() {
   `;
 
   document.getElementById('addOutletBtn').addEventListener('click', openAddOutletModal);
+  document.getElementById('exportOutletsCsvBtn').addEventListener('click', () => downloadOutletsCSV(filtered));
 
   const clearBtn = document.getElementById('clearOutletFiltersBtn');
   if (clearBtn) clearBtn.addEventListener('click', () => {
@@ -1798,6 +1804,37 @@ function renderOutlets() {
   document.querySelectorAll('.outlet-row').forEach(row => {
     row.addEventListener('click', () => openOutletDetail(row.dataset.id));
   });
+}
+
+/* ── Outlets CSV export ── exports whatever filteredOutlets() currently
+   returns (i.e. respects every active column filter, ignores pagination),
+   so e.g. filtering Zone + "Not visited yet" and exporting gives exactly
+   that list — unvisited places in a zone, places on/off a given software,
+   etc. — without needing a separate export-specific filter UI. */
+function csvField(value) {
+  const str = value === null || value === undefined ? '' : String(value);
+  return /[",\n]/.test(str) ? `"${str.replace(/"/g, '""')}"` : str;
+}
+function generateOutletsCSV(outlets) {
+  const headers = ['Business Name', 'Type', 'Zone', 'Region', 'Current Software', 'CRM Status', 'Last Visited', 'Last Visited By', 'Visit Count', 'Phone', 'Maps Link'];
+  const rows = outlets.map(o => [
+    o.business_name || '', o.business_type || '', o.zone || '', o.region || '',
+    o.current_software || '', crmStatusLabel(o.crm_status || 'unchecked'),
+    o.last_visited_at || 'Not visited yet', o.last_visited_by || '',
+    outletVisitCount(o.id), o.phone || '', o.maps_link || ''
+  ]);
+  return [headers, ...rows].map(row => row.map(csvField).join(',')).join('\r\n');
+}
+function downloadOutletsCSV(outlets) {
+  const csv = generateOutletsCSV(outlets);
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `outlets-export-${todayISO()}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+  toast(`Exported ${outlets.length} outlet${outlets.length !== 1 ? 's' : ''} to CSV`);
 }
 
 function crmPill(status) {
