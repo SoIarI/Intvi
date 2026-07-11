@@ -1994,28 +1994,41 @@ function closeModal() {
    VIEW: INTERN SUMMARY
    ============================================================ */
 
+/* Shared per-intern stat computation — reused by the on-screen table
+   (all-time, no range) and the downloadable report (scoped to a range). */
+function internStats(name, fromDate, toDate) {
+  const inRange = d => (!fromDate || d >= fromDate) && (!toDate || d <= toDate);
+  const visits = state.visits.filter(v => v.intern === name && inRange(v.visited_at));
+  const outletIds = new Set(visits.map(v => v.outlet_id));
+  const zones = new Set();
+  outletIds.forEach(id => {
+    const o = state.outlets.find(o => o.id === id);
+    if (o && o.zone) zones.add(o.zone);
+  });
+  const inCrm = visits.filter(v => v.crm_status_at_time === 'in_crm').length;
+  const pct = visits.length ? Math.round((inCrm / visits.length) * 100) : 0;
+  const lastVisit = visits.length ? visits.map(v => v.visited_at).sort().slice(-1)[0] : '—';
+  const lateRecords = state.attendance.filter(a => a.person === name && a.late_minutes > 0 && inRange(a.date));
+  const lateDays = lateRecords.length;
+  const totalLateMinutes = lateRecords.reduce((sum, a) => sum + a.late_minutes, 0);
+  return { name, total: visits.length, unique: outletIds.size, zones: zones.size, pct, lastVisit, lateDays, totalLateMinutes };
+}
+
+let internReportFrom = (() => { const d = new Date(); d.setDate(d.getDate() - 6); return d.toISOString().slice(0, 10); })();
+let internReportTo = todayISO();
+
 function renderInterns() {
   const el = document.getElementById('view-interns');
-  const rows = personNames().map(name => {
-    const visits = state.visits.filter(v => v.intern === name);
-    const outletIds = new Set(visits.map(v => v.outlet_id));
-    const zones = new Set();
-    outletIds.forEach(id => {
-      const o = state.outlets.find(o => o.id === id);
-      if (o && o.zone) zones.add(o.zone);
-    });
-    const inCrm = visits.filter(v => v.crm_status_at_time === 'in_crm').length;
-    const pct = visits.length ? Math.round((inCrm / visits.length) * 100) : 0;
-    const lastVisit = visits.length ? visits.map(v => v.visited_at).sort().slice(-1)[0] : '—';
-    const lateRecords = state.attendance.filter(a => a.person === name && a.late_minutes > 0);
-    const lateDays = lateRecords.length;
-    const totalLateMinutes = lateRecords.reduce((sum, a) => sum + a.late_minutes, 0);
-    return { name, total: visits.length, unique: outletIds.size, zones: zones.size, pct, lastVisit, lateDays, totalLateMinutes };
-  }).sort((a, b) => b.total - a.total);
+  const rows = personNames().map(name => internStats(name)).sort((a, b) => b.total - a.total);
 
   el.innerHTML = `
     <div class="view-header">
       <div><h2>Intern Summary</h2><p>Visit volume and CRM completion rate per intern.</p></div>
+    </div>
+    <div class="cluster gap-3" style="margin-bottom:var(--space-6);flex-wrap:wrap;align-items:flex-end;">
+      <div class="field" style="min-width:160px;"><label>Report From</label><input type="date" id="internReportFromInput" value="${internReportFrom}"></div>
+      <div class="field" style="min-width:160px;"><label>Report To</label><input type="date" id="internReportToInput" value="${internReportTo}"></div>
+      <button class="btn-primary btn-sm" id="downloadInternReportBtn">Download Report</button>
     </div>
     <div class="card" style="padding:0;overflow-x:auto;">
       ${rows.length === 0 ? '<div class="empty-state"><p>No visits logged yet.</p></div>' : `
@@ -2049,6 +2062,109 @@ function renderInterns() {
     <p class="text-sm text-muted" style="margin-bottom:var(--space-4);">Outlets visited more than once, across any intern.</p>
     ${renderRepeatVisitsList()}
   `;
+
+  document.getElementById('internReportFromInput').addEventListener('change', e => { internReportFrom = e.target.value; });
+  document.getElementById('internReportToInput').addEventListener('change', e => { internReportTo = e.target.value; });
+  document.getElementById('downloadInternReportBtn').addEventListener('click', downloadInternReport);
+}
+
+/* ── Downloadable Intern Summary report ── a self-contained, printable
+   HTML file: a summary table (same shape as the on-screen one, scoped
+   to the picked range) followed by one table per day in that range,
+   so day-to-day activity isn't buried inside the range totals. */
+function dateRangeArray(from, to) {
+  const dates = [];
+  if (!from || !to || from > to) return dates;
+  // Parsed and incremented in UTC throughout so the enumerated dates match
+  // the from/to strings exactly regardless of the browser's local timezone
+  // (parsing as local time and reading back via toISOString would drift by
+  // a day in any zone ahead of or behind UTC).
+  let d = new Date(from + 'T00:00:00Z');
+  const end = new Date(to + 'T00:00:00Z');
+  while (d <= end) {
+    dates.push(d.toISOString().slice(0, 10));
+    d.setUTCDate(d.getUTCDate() + 1);
+  }
+  return dates;
+}
+
+function generateInternReportHTML(from, to) {
+  const names = personNames();
+  const summaryRows = names.map(name => internStats(name, from, to)).sort((a, b) => b.total - a.total);
+
+  const dayBlocks = dateRangeArray(from, to).map(date => {
+    const dayVisits = state.visits.filter(v => v.visited_at === date);
+    const dayAttendance = state.attendance.filter(a => a.date === date);
+    const relevantNames = names.filter(name => dayVisits.some(v => v.intern === name) || dayAttendance.some(a => a.person === name));
+    if (relevantNames.length === 0) return '';
+    const rows = relevantNames.map(name => {
+      const nVisits = dayVisits.filter(v => v.intern === name).length;
+      const att = dayAttendance.find(a => a.person === name);
+      return `<tr>
+        <td>${escapeHTML(name)}</td>
+        <td>${nVisits}</td>
+        <td>${att && att.status ? escapeHTML(att.status) : '—'}</td>
+        <td>${att && att.clock_in ? escapeHTML(att.clock_in) : '—'}</td>
+        <td>${att && att.clock_out ? escapeHTML(att.clock_out) : '—'}</td>
+        <td>${att && att.late_minutes ? formatLateMinutes(att.late_minutes) : '—'}</td>
+      </tr>`;
+    }).join('');
+    return `
+      <h3>${date}</h3>
+      <table>
+        <thead><tr><th>Intern</th><th>Visits</th><th>Status</th><th>Clocked In</th><th>Clocked Out</th><th>Late By</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    `;
+  }).filter(Boolean).join('');
+
+  return `<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Intern Summary Report — ${from} to ${to}</title>
+<style>
+  body{font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;color:#1a1a1a;background:#fff;max-width:900px;margin:0 auto;padding:32px 24px;}
+  h1{font-size:24px;margin-bottom:4px;}
+  h2{font-size:18px;margin-top:40px;border-bottom:2px solid #1a1a1a;padding-bottom:6px;}
+  h3{font-size:15px;margin-top:24px;margin-bottom:8px;}
+  p.meta{color:#666;font-size:13px;margin-top:0;}
+  table{width:100%;border-collapse:collapse;margin-bottom:16px;font-size:13px;}
+  th,td{text-align:left;padding:6px 10px;border-bottom:1px solid #ddd;}
+  th{background:#f2f2f2;font-size:11px;text-transform:uppercase;letter-spacing:0.03em;color:#555;}
+  @media print { body{padding:0;} h2{page-break-before:auto;} }
+</style>
+</head>
+<body>
+  <h1>Intern Summary Report</h1>
+  <p class="meta">${from} to ${to} — generated ${nowISO().slice(0, 16).replace('T', ' ')}</p>
+
+  <h2>Summary</h2>
+  <table>
+    <thead><tr><th>Intern</th><th>Total Visits</th><th>Unique Outlets</th><th>Zones Covered</th><th>% In CRM</th><th>Last Visit</th><th>Late Days</th><th>Total Late Time</th></tr></thead>
+    <tbody>
+      ${summaryRows.map(r => `<tr><td>${escapeHTML(r.name)}</td><td>${r.total}</td><td>${r.unique}</td><td>${r.zones}</td><td>${r.pct}%</td><td>${escapeHTML(r.lastVisit)}</td><td>${r.lateDays || '—'}</td><td>${r.totalLateMinutes ? formatLateMinutes(r.totalLateMinutes).replace(' late', '') : '—'}</td></tr>`).join('')}
+    </tbody>
+  </table>
+
+  <h2>Daily Breakdown</h2>
+  ${dayBlocks || '<p>No activity recorded in this range.</p>'}
+</body>
+</html>`;
+}
+
+function downloadInternReport() {
+  if (!internReportFrom || !internReportTo) { toast('Pick a from and to date first'); return; }
+  if (internReportFrom > internReportTo) { toast('"Report From" must be before "Report To"'); return; }
+  const html = generateInternReportHTML(internReportFrom, internReportTo);
+  const blob = new Blob([html], { type: 'text/html' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `intern-summary-${internReportFrom}-to-${internReportTo}.html`;
+  a.click();
+  URL.revokeObjectURL(url);
+  toast('Report downloaded');
 }
 
 function renderRepeatVisitsList() {
