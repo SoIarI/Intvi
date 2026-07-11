@@ -349,7 +349,8 @@ const STORAGE_KEYS = {
   dayLogHistory: 'vi_daylog_history',
   softwareColors: 'vi_software_colors',
   shiftTypes: 'vi_shift_types',
-  shiftAssignments: 'vi_hr_shift_assignments'
+  shiftAssignments: 'vi_hr_shift_assignments',
+  telegramConfig: 'vi_telegram_config'
 };
 
 // Friendly names for the JSON-import preview table — keys match STORAGE_KEYS.
@@ -358,7 +359,8 @@ const STORAGE_LABELS = {
   departments: 'Departments', zones: 'Zones', drafts: 'Review Drafts', attendance: 'Attendance',
   dayReportDrafts: 'Day Report Drafts', dayReports: 'Day Reports', leaveTypes: 'Leave Types',
   leaveRequests: 'Leave Requests', tasks: 'Tasks', dayLogAutosaves: 'Day Logger Drafts', dayLogHistory: 'Day Logger History',
-  softwareColors: 'Software Colors', shiftTypes: 'Shift Types', shiftAssignments: 'HR Shift Assignments'
+  softwareColors: 'Software Colors', shiftTypes: 'Shift Types', shiftAssignments: 'HR Shift Assignments',
+  telegramConfig: 'Telegram Config'
 };
 
 const DEFAULT_ZONES = [
@@ -516,7 +518,8 @@ let state = {
   dayLogHistory: loadJSON(STORAGE_KEYS.dayLogHistory, []),
   softwareColors: loadJSON(STORAGE_KEYS.softwareColors, { ...DEFAULT_SOFTWARE_COLORS }),
   shiftTypes: loadJSON(STORAGE_KEYS.shiftTypes, DEFAULT_SHIFT_TYPES.slice()),
-  shiftAssignments: loadJSON(STORAGE_KEYS.shiftAssignments, [])
+  shiftAssignments: loadJSON(STORAGE_KEYS.shiftAssignments, []),
+  telegramConfig: loadJSON(STORAGE_KEYS.telegramConfig, { botToken: '', chatId: '' })
 };
 
 function persist() {
@@ -538,6 +541,7 @@ function persist() {
   saveJSON(STORAGE_KEYS.softwareColors, state.softwareColors);
   saveJSON(STORAGE_KEYS.shiftTypes, state.shiftTypes);
   saveJSON(STORAGE_KEYS.shiftAssignments, state.shiftAssignments);
+  saveJSON(STORAGE_KEYS.telegramConfig, state.telegramConfig);
 }
 
 function toast(msg) {
@@ -3073,6 +3077,38 @@ function openLeaveModal() {
   });
 }
 
+/* ── Telegram push ── posts directly from the browser to the Telegram Bot
+   API using the token saved in Settings (state.telegramConfig); no
+   backend involved, same as this app's other client-only integrations. */
+async function sendTelegramMessage(text) {
+  const cfg = state.telegramConfig;
+  if (!cfg.botToken || !cfg.chatId) {
+    toast('Set a Telegram bot token and chat ID in Settings first');
+    return false;
+  }
+  try {
+    const res = await fetch(`https://api.telegram.org/bot${cfg.botToken}/sendMessage`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chat_id: cfg.chatId, text })
+    });
+    const data = await res.json();
+    if (!data.ok) { toast(`Telegram error: ${data.description || 'send failed'}`); return false; }
+    toast('Pushed to Telegram');
+    return true;
+  } catch (e) {
+    toast('Could not reach Telegram — check your connection');
+    return false;
+  }
+}
+
+function formatTasksMessageForDate(date) {
+  const dayTasks = state.tasks.filter(t => t.date === date).sort((a, b) => a.hour.localeCompare(b.hour));
+  if (dayTasks.length === 0) return null;
+  const lines = dayTasks.map(t => `${t.done ? '✅' : '▫️'} ${t.hour} — ${t.person}: ${t.task}`);
+  return `📋 Tasks — ${date}\n${lines.join('\n')}`;
+}
+
 /* ── Tasks ── freetext task assigned to a person at a specific hour, with a completion checkbox ── */
 
 let taskViewDate = todayISO();
@@ -3086,7 +3122,10 @@ function renderHRTasks() {
   el.innerHTML = `
     <div class="cluster gap-3" style="justify-content:space-between;margin-bottom:var(--space-5);flex-wrap:wrap;">
       <div class="field" style="min-width:180px;"><label>Date</label><input type="date" id="taskDateInput" value="${taskViewDate}"></div>
-      <button class="btn-primary btn-sm" id="addTaskBtn">+ Assign Task</button>
+      <div class="cluster gap-2">
+        <button class="btn-ghost btn-sm" id="pushTasksTelegramBtn">Push to Telegram</button>
+        <button class="btn-primary btn-sm" id="addTaskBtn">+ Assign Task</button>
+      </div>
     </div>
     <div class="card" style="padding:0;overflow-x:auto;">
       ${dayTasks.length === 0 ? '<div class="empty-state"><p>No tasks assigned for this date yet.</p></div>' : `
@@ -3112,6 +3151,11 @@ function renderHRTasks() {
     renderHRTasks();
   });
   document.getElementById('addTaskBtn').addEventListener('click', openTaskModal);
+  document.getElementById('pushTasksTelegramBtn').addEventListener('click', () => {
+    const message = formatTasksMessageForDate(taskViewDate);
+    if (!message) { toast('No tasks to push for this date'); return; }
+    sendTelegramMessage(message);
+  });
   document.querySelectorAll('.task-done-checkbox').forEach(cb => {
     cb.addEventListener('change', () => {
       const t = state.tasks.find(x => x.id === cb.dataset.id);
@@ -3256,6 +3300,15 @@ function renderSettings() {
     </div>
 
     <div class="card" style="margin-top:var(--space-8);">
+      <strong>Telegram Integration</strong>
+      <p class="text-sm text-muted" style="margin-top:var(--space-2);margin-bottom:var(--space-4);">Used by HR &rarr; Tasks' "Push to Telegram" button to post the day's assigned tasks to a group. The bot token is saved only in this browser and sent directly to Telegram's API — no other server sees it.</p>
+      <div class="grid-2 gap-4">
+        <div class="field"><label>Bot Token</label><input type="password" id="telegramBotTokenInput" placeholder="123456:ABC-DEF..." value="${escapeHTML(state.telegramConfig.botToken)}"></div>
+        <div class="field"><label>Group Chat ID</label><input type="text" id="telegramChatIdInput" placeholder="-100123456789" value="${escapeHTML(state.telegramConfig.chatId)}"></div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:var(--space-8);">
       <strong>Data</strong>
       <p class="text-sm text-muted" style="margin-top:var(--space-2);margin-bottom:var(--space-4);">Everything is stored in this browser only. Export a backup, import one from another copy of this file, or clear all data.</p>
       <div class="cluster gap-3">
@@ -3331,6 +3384,14 @@ function renderSettings() {
       persist();
     });
   });
+  document.getElementById('telegramBotTokenInput').addEventListener('change', e => {
+    state.telegramConfig.botToken = e.target.value.trim();
+    persist();
+  });
+  document.getElementById('telegramChatIdInput').addEventListener('change', e => {
+    state.telegramConfig.chatId = e.target.value.trim();
+    persist();
+  });
   document.getElementById('resetSoftwareColorsBtn').addEventListener('click', () => {
     if (!confirm('Reset all software colors to defaults?')) return;
     state.softwareColors = { ...DEFAULT_SOFTWARE_COLORS };
@@ -3364,7 +3425,8 @@ function renderSettings() {
       tasks: [],
       dayLogAutosaves: [], dayLogHistory: [],
       softwareColors: state.softwareColors,
-      shiftTypes: state.shiftTypes, shiftAssignments: []
+      shiftTypes: state.shiftTypes, shiftAssignments: [],
+      telegramConfig: state.telegramConfig
     };
     persist();
     toast('All data cleared');
