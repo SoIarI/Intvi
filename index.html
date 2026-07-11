@@ -1626,26 +1626,98 @@ function renderZoneLegend() {
    VIEW: OUTLETS
    ============================================================ */
 
+/* ── Outlets: per-column filters + pagination ──
+   Every column but Business Name filters via a preset dropdown built from
+   the distinct values actually present in state.outlets (so the options
+   always match what's real), rather than free text. Business Name keeps
+   a text search since a dropdown of every outlet name isn't useful. */
+let outletFilters = {
+  business_name: '', business_type: '', zone: '', current_software: '',
+  crm_status: '', last_visited: '', last_visited_by: '', visits: ''
+};
+let outletPage = 1;
+let outletPageSize = 25;
+const OUTLET_PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
+
+function outletColumnValue(o, key) {
+  if (key === 'visits') return String(outletVisitCount(o.id));
+  if (key === 'crm_status') return o.crm_status || 'unchecked';
+  return o[key] || '';
+}
+function distinctOutletValues(key) {
+  const set = new Set();
+  state.outlets.forEach(o => {
+    const v = outletColumnValue(o, key);
+    if (v) set.add(v);
+  });
+  return [...set].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+}
+function crmStatusLabel(status) {
+  if (status === 'in_crm') return 'In CRM';
+  if (status === 'not_in_crm') return 'Not in CRM';
+  return 'Unchecked';
+}
+function outletFilterSelectHTML(key, options, current) {
+  return `<select class="outlet-filter-select" data-key="${key}" style="width:100%;font-size:var(--text-xs);background:var(--color-bg-muted);border:1px solid var(--color-border);border-radius:var(--radius-sm);padding:var(--space-1) var(--space-2);color:var(--color-text-primary);">
+    <option value="">All</option>
+    ${options.map(o => `<option value="${escapeHTML(o.value)}" ${o.value === current ? 'selected' : ''}>${escapeHTML(o.label)}</option>`).join('')}
+  </select>`;
+}
+function filteredOutlets() {
+  return state.outlets.filter(o => {
+    if (outletFilters.business_name && !normalizeName(o.business_name).includes(normalizeName(outletFilters.business_name))) return false;
+    if (outletFilters.business_type && outletColumnValue(o, 'business_type') !== outletFilters.business_type) return false;
+    if (outletFilters.zone && outletColumnValue(o, 'zone') !== outletFilters.zone) return false;
+    if (outletFilters.current_software && outletColumnValue(o, 'current_software') !== outletFilters.current_software) return false;
+    if (outletFilters.crm_status && outletColumnValue(o, 'crm_status') !== outletFilters.crm_status) return false;
+    if (outletFilters.last_visited === 'visited' && !o.last_visited_at) return false;
+    if (outletFilters.last_visited === 'not_visited' && o.last_visited_at) return false;
+    if (outletFilters.last_visited_by && outletColumnValue(o, 'last_visited_by') !== outletFilters.last_visited_by) return false;
+    if (outletFilters.visits && outletColumnValue(o, 'visits') !== outletFilters.visits) return false;
+    return true;
+  }).sort((a, b) => (b.last_visited_at || '').localeCompare(a.last_visited_at || ''));
+}
+
 function renderOutlets() {
   const el = document.getElementById('view-outlets');
-  const sorted = [...state.outlets].sort((a, b) => (b.last_visited_at || '').localeCompare(a.last_visited_at || ''));
+  const filtered = filteredOutlets();
+  const hasFilters = Object.values(outletFilters).some(v => v);
+
+  const totalPages = outletPageSize > 0 ? Math.max(1, Math.ceil(filtered.length / outletPageSize)) : 1;
+  if (outletPage > totalPages) outletPage = totalPages;
+  if (outletPage < 1) outletPage = 1;
+  const pageItems = outletPageSize > 0 ? filtered.slice((outletPage - 1) * outletPageSize, outletPage * outletPageSize) : filtered;
+  const rangeStart = filtered.length === 0 ? 0 : (outletPageSize > 0 ? (outletPage - 1) * outletPageSize + 1 : 1);
+  const rangeEnd = outletPageSize > 0 ? Math.min(filtered.length, outletPage * outletPageSize) : filtered.length;
 
   el.innerHTML = `
     <div class="view-header">
       <div><h2>Outlets</h2><p>${state.outlets.length} outlet${state.outlets.length !== 1 ? 's' : ''} tracked. Click a row for full visit history.</p></div>
       <div class="cluster gap-3">
-        <input type="text" id="outletSearch" placeholder="Search by name..." style="background:var(--color-bg-muted);border:1px solid var(--color-border);border-radius:var(--radius-sm);padding:var(--space-2) var(--space-4);font-size:var(--text-sm);color:var(--color-text-primary);min-width:220px;">
+        ${hasFilters ? '<button class="btn-ghost btn-sm" id="clearOutletFiltersBtn">Clear Filters</button>' : ''}
         <button class="btn-primary btn-sm" id="addOutletBtn">+ Add Outlet</button>
       </div>
     </div>
     <div class="card" style="padding:0;overflow-x:auto;">
-      ${sorted.length === 0 ? '<div class="empty-state"><p>No outlets yet. Confirm visits in the Review Queue, or add one manually.</p></div>' : `
+      ${state.outlets.length === 0 ? '<div class="empty-state"><p>No outlets yet. Confirm visits in the Review Queue, or add one manually.</p></div>' : `
       <table id="outletsTable">
-        <thead><tr>
-          <th>Business</th><th>Type</th><th>Zone / Region</th><th>Software</th><th>CRM</th><th>Last Visit</th><th>By</th><th>Visits</th>
-        </tr></thead>
+        <thead>
+          <tr>
+            <th>Business</th><th>Type</th><th>Zone / Region</th><th>Software</th><th>CRM</th><th>Last Visit</th><th>By</th><th>Visits</th>
+          </tr>
+          <tr>
+            <td style="padding:var(--space-2) var(--space-4);"><input type="text" id="outletSearchFilter" placeholder="Search..." value="${escapeHTML(outletFilters.business_name)}" style="width:100%;font-size:var(--text-xs);background:var(--color-bg-muted);border:1px solid var(--color-border);border-radius:var(--radius-sm);padding:var(--space-1) var(--space-2);color:var(--color-text-primary);"></td>
+            <td style="padding:var(--space-2) var(--space-4);">${outletFilterSelectHTML('business_type', distinctOutletValues('business_type').map(v => ({ value: v, label: v })), outletFilters.business_type)}</td>
+            <td style="padding:var(--space-2) var(--space-4);">${outletFilterSelectHTML('zone', distinctOutletValues('zone').map(v => ({ value: v, label: v })), outletFilters.zone)}</td>
+            <td style="padding:var(--space-2) var(--space-4);">${outletFilterSelectHTML('current_software', distinctOutletValues('current_software').map(v => ({ value: v, label: v })), outletFilters.current_software)}</td>
+            <td style="padding:var(--space-2) var(--space-4);">${outletFilterSelectHTML('crm_status', ['unchecked', 'in_crm', 'not_in_crm'].map(v => ({ value: v, label: crmStatusLabel(v) })), outletFilters.crm_status)}</td>
+            <td style="padding:var(--space-2) var(--space-4);">${outletFilterSelectHTML('last_visited', [{ value: 'visited', label: 'Visited' }, { value: 'not_visited', label: 'Not visited yet' }], outletFilters.last_visited)}</td>
+            <td style="padding:var(--space-2) var(--space-4);">${outletFilterSelectHTML('last_visited_by', distinctOutletValues('last_visited_by').map(v => ({ value: v, label: v })), outletFilters.last_visited_by)}</td>
+            <td style="padding:var(--space-2) var(--space-4);">${outletFilterSelectHTML('visits', distinctOutletValues('visits').map(v => ({ value: v, label: v })), outletFilters.visits)}</td>
+          </tr>
+        </thead>
         <tbody>
-          ${sorted.map(o => `
+          ${pageItems.length === 0 ? `<tr><td colspan="8"><div class="empty-state"><p>No outlets match these filters.</p></div></td></tr>` : pageItems.map(o => `
             <tr class="outlet-row" data-id="${o.id}" style="cursor:pointer;">
               <td><strong>${escapeHTML(o.business_name)}</strong></td>
               <td class="text-muted">${escapeHTML(o.business_type || '—')}</td>
@@ -1658,20 +1730,59 @@ function renderOutlets() {
             </tr>
           `).join('')}
         </tbody>
-      </table>`}
+      </table>
+      <div class="cluster gap-3" style="justify-content:space-between;padding:var(--space-4);border-top:1px solid var(--color-border);flex-wrap:wrap;">
+        <span class="text-xs text-muted">${filtered.length === 0 ? '0 of ' + state.outlets.length : `${rangeStart}–${rangeEnd} of ${filtered.length}`}${hasFilters ? ` (filtered from ${state.outlets.length})` : ''}</span>
+        <div class="cluster gap-2">
+          <select id="outletPageSizeSelect" style="font-size:var(--text-xs);background:var(--color-bg-muted);border:1px solid var(--color-border);border-radius:var(--radius-sm);padding:var(--space-1) var(--space-2);color:var(--color-text-primary);">
+            ${OUTLET_PAGE_SIZE_OPTIONS.map(n => `<option value="${n}" ${n === outletPageSize ? 'selected' : ''}>${n} / page</option>`).join('')}
+            <option value="0" ${outletPageSize === 0 ? 'selected' : ''}>Show all</option>
+          </select>
+          <button class="btn-ghost btn-sm" id="outletPrevPageBtn" ${outletPage <= 1 ? 'disabled' : ''}>Prev</button>
+          <span class="text-xs text-muted">Page ${outletPage} of ${totalPages}</span>
+          <button class="btn-ghost btn-sm" id="outletNextPageBtn" ${outletPage >= totalPages ? 'disabled' : ''}>Next</button>
+        </div>
+      </div>`}
     </div>
   `;
 
   document.getElementById('addOutletBtn').addEventListener('click', openAddOutletModal);
 
-  document.getElementById('outletSearch') && document.getElementById('outletSearch').addEventListener('input', e => {
-    const q = normalizeName(e.target.value);
-    document.querySelectorAll('#outletsTable tbody tr').forEach(row => {
-      const id = row.dataset.id;
-      const outlet = state.outlets.find(o => o.id === id);
-      row.style.display = normalizeName(outlet.business_name).includes(q) ? '' : 'none';
+  const clearBtn = document.getElementById('clearOutletFiltersBtn');
+  if (clearBtn) clearBtn.addEventListener('click', () => {
+    Object.keys(outletFilters).forEach(k => outletFilters[k] = '');
+    outletPage = 1;
+    renderOutlets();
+  });
+
+  const searchInput = document.getElementById('outletSearchFilter');
+  if (searchInput) searchInput.addEventListener('input', e => {
+    outletFilters.business_name = e.target.value;
+    outletPage = 1;
+    const cursorPos = e.target.selectionStart;
+    renderOutlets();
+    const newInput = document.getElementById('outletSearchFilter');
+    if (newInput) { newInput.focus(); newInput.setSelectionRange(cursorPos, cursorPos); }
+  });
+
+  document.querySelectorAll('.outlet-filter-select').forEach(sel => {
+    sel.addEventListener('change', () => {
+      outletFilters[sel.dataset.key] = sel.value;
+      outletPage = 1;
+      renderOutlets();
     });
   });
+
+  const pageSizeSelect = document.getElementById('outletPageSizeSelect');
+  if (pageSizeSelect) pageSizeSelect.addEventListener('change', e => {
+    outletPageSize = Number(e.target.value);
+    outletPage = 1;
+    renderOutlets();
+  });
+  const prevBtn = document.getElementById('outletPrevPageBtn');
+  if (prevBtn) prevBtn.addEventListener('click', () => { outletPage--; renderOutlets(); });
+  const nextBtn = document.getElementById('outletNextPageBtn');
+  if (nextBtn) nextBtn.addEventListener('click', () => { outletPage++; renderOutlets(); });
 
   document.querySelectorAll('.outlet-row').forEach(row => {
     row.addEventListener('click', () => openOutletDetail(row.dataset.id));
