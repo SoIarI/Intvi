@@ -350,7 +350,8 @@ const STORAGE_KEYS = {
   softwareColors: 'vi_software_colors',
   shiftTypes: 'vi_shift_types',
   shiftAssignments: 'vi_hr_shift_assignments',
-  telegramConfig: 'vi_telegram_config'
+  telegramConfig: 'vi_telegram_config',
+  weeklyShiftDefaults: 'vi_weekly_shift_defaults'
 };
 
 // Friendly names for the JSON-import preview table — keys match STORAGE_KEYS.
@@ -360,7 +361,7 @@ const STORAGE_LABELS = {
   dayReportDrafts: 'Day Report Drafts', dayReports: 'Day Reports', leaveTypes: 'Leave Types',
   leaveRequests: 'Leave Requests', tasks: 'Tasks', dayLogAutosaves: 'Day Logger Drafts', dayLogHistory: 'Day Logger History',
   softwareColors: 'Software Colors', shiftTypes: 'Shift Types', shiftAssignments: 'HR Shift Assignments',
-  telegramConfig: 'Telegram Config'
+  telegramConfig: 'Telegram Config', weeklyShiftDefaults: 'Weekly Shift Defaults'
 };
 
 const DEFAULT_ZONES = [
@@ -519,7 +520,8 @@ let state = {
   softwareColors: loadJSON(STORAGE_KEYS.softwareColors, { ...DEFAULT_SOFTWARE_COLORS }),
   shiftTypes: loadJSON(STORAGE_KEYS.shiftTypes, DEFAULT_SHIFT_TYPES.slice()),
   shiftAssignments: loadJSON(STORAGE_KEYS.shiftAssignments, []),
-  telegramConfig: loadJSON(STORAGE_KEYS.telegramConfig, { botToken: '', chatId: '' })
+  telegramConfig: loadJSON(STORAGE_KEYS.telegramConfig, { botToken: '', chatId: '' }),
+  weeklyShiftDefaults: loadJSON(STORAGE_KEYS.weeklyShiftDefaults, {})
 };
 
 function persist() {
@@ -542,6 +544,7 @@ function persist() {
   saveJSON(STORAGE_KEYS.shiftTypes, state.shiftTypes);
   saveJSON(STORAGE_KEYS.shiftAssignments, state.shiftAssignments);
   saveJSON(STORAGE_KEYS.telegramConfig, state.telegramConfig);
+  saveJSON(STORAGE_KEYS.weeklyShiftDefaults, state.weeklyShiftDefaults);
 }
 
 function toast(msg) {
@@ -591,6 +594,14 @@ function getShiftType(id) {
 }
 function getShiftAssignment(personName, date) {
   return state.shiftAssignments.find(a => a.person === personName && a.date === date) || null;
+}
+/* The shift actually in effect for a person on a date: a one-off
+   per-date override (state.shiftAssignments) if one exists, otherwise
+   their standing weekly default (state.weeklyShiftDefaults). */
+function getEffectiveShiftType(personName, date) {
+  const override = getShiftAssignment(personName, date);
+  const shiftTypeId = override ? override.shiftTypeId : state.weeklyShiftDefaults[personName];
+  return shiftTypeId ? getShiftType(shiftTypeId) : null;
 }
 function timeToMinutes(str) {
   if (!str) return null;
@@ -2619,23 +2630,49 @@ function renderHRShifts() {
       </div>
     </div>
 
+    <h3 style="font-size:var(--text-xl);margin-bottom:var(--space-2);">Weekly Shift Defaults</h3>
+    <p class="text-sm text-muted" style="margin-bottom:var(--space-4);">Set once — each person's standing shift applies every day automatically. Change it here when the roster shifts week to week; use the one-off override below only for single-day exceptions.</p>
+    <div class="card" style="padding:0;overflow-x:auto;margin-bottom:var(--space-8);">
+      ${sorted.length === 0 ? '<div class="empty-state"><p>No people on record yet — add them in Directory.</p></div>' : `
+      <table>
+        <thead><tr><th>Name</th><th>Default Shift</th></tr></thead>
+        <tbody>
+          ${sorted.map(p => {
+            const currentDefault = state.weeklyShiftDefaults[p.name] || '';
+            return `
+              <tr>
+                <td><strong>${escapeHTML(p.name)}</strong></td>
+                <td>
+                  <select data-name="${escapeHTML(p.name)}" class="weekly-shift-default-select">
+                    <option value="">— none —</option>
+                    ${state.shiftTypes.map(s => `<option value="${s.id}" ${currentDefault === s.id ? 'selected' : ''}>${escapeHTML(s.name)} (${s.start}–${s.end})</option>`).join('')}
+                  </select>
+                </td>
+              </tr>
+            `;
+          }).join('')}
+        </tbody>
+      </table>`}
+    </div>
+
     <div class="view-header">
-      <div><h3 style="font-size:var(--text-xl);">Assign Shifts</h3><p class="text-sm text-muted">Give each person a shift for the selected date.</p></div>
+      <div><h3 style="font-size:var(--text-xl);">One-Off Override</h3><p class="text-sm text-muted">Only for a specific date that differs from the weekly default above.</p></div>
       <div class="field" style="min-width:180px;"><label>Date</label><input type="date" id="shiftAssignDateInput" value="${hrShiftAssignDate}"></div>
     </div>
     <div class="card" style="padding:0;overflow-x:auto;">
       ${sorted.length === 0 ? '<div class="empty-state"><p>No people on record yet — add them in Directory.</p></div>' : `
       <table>
-        <thead><tr><th>Name</th><th>Shift</th></tr></thead>
+        <thead><tr><th>Name</th><th>Shift for ${hrShiftAssignDate}</th></tr></thead>
         <tbody>
           ${sorted.map(p => {
             const assignment = getShiftAssignment(p.name, hrShiftAssignDate);
+            const defaultType = getShiftType(state.weeklyShiftDefaults[p.name]);
             return `
               <tr>
                 <td><strong>${escapeHTML(p.name)}</strong></td>
                 <td>
                   <select data-name="${escapeHTML(p.name)}" class="shift-assign-select">
-                    <option value="">— unassigned —</option>
+                    <option value="">${defaultType ? `— Use Default (${escapeHTML(defaultType.name)}) —` : '— Use Default (none set) —'}</option>
                     ${state.shiftTypes.map(s => `<option value="${s.id}" ${assignment && assignment.shiftTypeId === s.id ? 'selected' : ''}>${escapeHTML(s.name)} (${s.start}–${s.end})</option>`).join('')}
                   </select>
                 </td>
@@ -2668,7 +2705,20 @@ function renderHRShifts() {
     btn.addEventListener('click', () => {
       state.shiftTypes = state.shiftTypes.filter(s => s.id !== btn.dataset.id);
       state.shiftAssignments = state.shiftAssignments.filter(a => a.shiftTypeId !== btn.dataset.id);
+      Object.keys(state.weeklyShiftDefaults).forEach(person => {
+        if (state.weeklyShiftDefaults[person] === btn.dataset.id) delete state.weeklyShiftDefaults[person];
+      });
       persist();
+      renderHRShifts();
+    });
+  });
+  document.querySelectorAll('.weekly-shift-default-select').forEach(sel => {
+    sel.addEventListener('change', () => {
+      const person = sel.dataset.name;
+      if (sel.value) state.weeklyShiftDefaults[person] = sel.value;
+      else delete state.weeklyShiftDefaults[person];
+      persist();
+      toast(`${person}'s default shift updated`);
       renderHRShifts();
     });
   });
@@ -2684,7 +2734,8 @@ function renderHRShifts() {
         state.shiftAssignments.push({ id: uid(), person, date: hrShiftAssignDate, shiftTypeId: sel.value });
       }
       persist();
-      toast(`${person}'s shift updated`);
+      toast(`${person}'s shift updated for ${hrShiftAssignDate}`);
+      renderHRShifts();
     });
   });
 }
@@ -2708,8 +2759,7 @@ function renderClockInOut() {
             const rec = state.attendance.find(a => a.person === p.name && a.date === date);
             const clockedIn = rec && rec.clock_in;
             const clockedOut = rec && rec.clock_out;
-            const assignment = getShiftAssignment(p.name, date);
-            const shiftType = assignment ? getShiftType(assignment.shiftTypeId) : null;
+            const shiftType = getEffectiveShiftType(p.name, date);
             return `
               <tr>
                 <td><strong>${escapeHTML(p.name)}</strong></td>
@@ -2766,8 +2816,7 @@ function renderClockInOut() {
    (e.g. someone marked "Half Day" in the Attendance tab). */
 function applyClockInStatus(rec, personName, date) {
   if (rec.status) return;
-  const assignment = getShiftAssignment(personName, date);
-  const shiftType = assignment ? getShiftType(assignment.shiftTypeId) : null;
+  const shiftType = getEffectiveShiftType(personName, date);
   const cutoffMinutes = shiftType ? timeToMinutes(shiftType.start) : (9 * 60 + 30);
   const clockInMinutes = timeToMinutes(rec.clock_in);
   rec.status = clockInMinutes > cutoffMinutes ? 'Late' : 'Present';
@@ -3537,7 +3586,8 @@ function renderSettings() {
       dayLogAutosaves: [], dayLogHistory: [],
       softwareColors: state.softwareColors,
       shiftTypes: state.shiftTypes, shiftAssignments: [],
-      telegramConfig: state.telegramConfig
+      telegramConfig: state.telegramConfig,
+      weeklyShiftDefaults: state.weeklyShiftDefaults
     };
     persist();
     toast('All data cleared');
