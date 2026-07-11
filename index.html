@@ -1955,6 +1955,27 @@ function renderSoftware() {
         Object.entries(zoneGroups).sort((a,b) => b[1].length - a[1].length).map(([zone, outlets]) => softwareBreakdownCard(zone, outlets)).join('')}
     </div>
   `;
+
+  // Update matching bar segments/swatches directly on 'input' (fires
+  // continuously while the native color picker is open) instead of a full
+  // renderSoftware() re-render, which would tear out the input mid-drag and
+  // close the picker after the first pixel. Persist on 'change' (fires once,
+  // when the picker closes) — same split the Settings color picker uses.
+  document.querySelectorAll('.software-dominance-color-input').forEach(inp => {
+    inp.addEventListener('input', () => {
+      const key = inp.dataset.key;
+      document.querySelectorAll(`.software-dominance-bar-segment[data-key="${key}"]`).forEach(seg => {
+        seg.style.background = inp.value;
+      });
+      document.querySelectorAll(`.software-dominance-color-input[data-key="${key}"]`).forEach(other => {
+        if (other !== inp) other.value = inp.value;
+      });
+    });
+    inp.addEventListener('change', () => {
+      state.softwareColors[inp.dataset.key] = inp.value;
+      persist();
+    });
+  });
 }
 
 function softwareBreakdownCard(label, outlets) {
@@ -1983,13 +2004,13 @@ function softwareBreakdownCard(label, outlets) {
       </div>
       <div class="bar-row" style="margin-bottom:var(--space-4);">
         <div class="bar-track">
-          ${entries.map(([sw, count]) => `<div class="bar-segment" style="width:${(count/total*100)}%;background:${colorForSoftware(sw)};" title="${escapeHTML(sw)}: ${count}"></div>`).join('')}
+          ${entries.map(([sw, count]) => `<div class="bar-segment software-dominance-bar-segment" data-key="${softwareColorKey(sw)}" style="width:${(count/total*100)}%;background:${colorForSoftware(sw)};" title="${escapeHTML(sw)}: ${count}"></div>`).join('')}
         </div>
       </div>
       <div class="cluster gap-4">
         ${entries.map(([sw, count]) => `
           <div class="cluster gap-2">
-            <span style="width:10px;height:10px;border-radius:50%;background:${colorForSoftware(sw)};display:inline-block;"></span>
+            <input type="color" class="software-dominance-color-input" data-key="${softwareColorKey(sw)}" value="${colorForSoftware(sw)}" title="Change ${escapeHTML(sw)}'s color" style="width:14px;height:14px;padding:0;border:none;border-radius:50%;background:none;cursor:pointer;">
             <span class="text-xs text-muted">${escapeHTML(sw)} — ${Math.round(count/total*100)}% (${count})</span>
           </div>
         `).join('')}
